@@ -2,7 +2,8 @@
 from fastapi import FastAPI
 
 from controller import (
-    health_controller
+    health_controller,
+    infer_controller
 )
 
 ROUTER_CONFIGS = [
@@ -10,6 +11,12 @@ ROUTER_CONFIGS = [
         "router": health_controller.router,
         "prefix": "",
         "tag": ["健康测试"],
+        "dependencies": [],
+    },
+    {
+        "router": infer_controller.router,
+        "prefix": "/infer",
+        "tag": ["模型推理"],
         "dependencies": [],
     }
 ]
