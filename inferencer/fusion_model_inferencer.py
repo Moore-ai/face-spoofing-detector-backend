@@ -1,4 +1,4 @@
-from base_inferencer import BaseInferencer, ModelFormat
+from inferencer.base_inferencer import FusionBaseInferencer, ModelFormat
 
 import numpy as np
 import cv2
@@ -7,7 +7,7 @@ import torch
 from torch import Tensor
 
 
-class FusionModalInferencer(BaseInferencer):
+class FusionModalInferencer(FusionBaseInferencer):
     """
     融合模态推理器（RGB + IR）
     """
@@ -33,7 +33,7 @@ class FusionModalInferencer(BaseInferencer):
         self.device: str = device
         self.rknn_target = rknn_target
         self.model: Any = None
-        
+
         super().__init__(model_path, input_size, num_classes)
 
     def _load_model(self):
@@ -149,7 +149,7 @@ class FusionModalInferencer(BaseInferencer):
         elif self.model_format == ModelFormat.RKNN:
             # 初始化运行时（仅第一次）
             if not self.rknn_initialized:
-                ret = self.model.init_runtime(target=self.rknn_target) # type: ignore
+                ret = self.model.init_runtime(target=self.rknn_target)  # type: ignore
                 if ret != 0:
                     raise RuntimeError(
                         f"初始化RKNN运行时失败，target={self.rknn_target}"
@@ -161,7 +161,7 @@ class FusionModalInferencer(BaseInferencer):
                 input_data = np.transpose(input_data, (0, 2, 3, 1))
 
             im = np.transpose(input_data[0], (1, 2, 0))  # CHW -> HWC
-            outputs = self.model.inference(inputs=[im]) # type: ignore
+            outputs = self.model.inference(inputs=[im])  # type: ignore
             return np.array(outputs[0])
         else:
             raise ValueError(f"不支持的模型格式: {self.model_format}")

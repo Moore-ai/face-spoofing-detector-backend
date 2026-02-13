@@ -6,6 +6,9 @@ from controller import (
     infer_controller
 )
 
+import logging
+logger = logging.getLogger(__name__)
+
 ROUTER_CONFIGS = [
     {
         "router": health_controller.router,
@@ -29,4 +32,4 @@ def register_routers(app: FastAPI):
             tags=config["tag"],
             dependencies=config.get("dependencies", []),
         )
-        print(f"📦 注册路由: {config.get('prefix', '')} -> {config.get('tag', '')}")
+        logger.info(f"📦 注册路由: {config.get('prefix', '')} -> {config.get('tag', '')}")

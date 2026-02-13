@@ -1,7 +1,23 @@
+import base64
+import io
+
+import numpy as np
 from fastapi import APIRouter
+from PIL import Image
 from pydantic import BaseModel
 
+from lifespan import InferServiceDep
+from schemas.detection import BatchDetectionResult
+from util.batch_result_builder import build_batch_detection_result
+
 router = APIRouter()
+
+
+def decode_base64_image(base64_str: str) -> np.ndarray:
+    """将 base64 字符串解码为 numpy 图像数组"""
+    img_data = base64.b64decode(base64_str)
+    img = Image.open(io.BytesIO(img_data))
+    return np.array(img)
 
 
 class SingleModeRequest(BaseModel):
@@ -25,97 +41,36 @@ class BatchDetectRequest(BaseModel):
     mode: str
 
 
-class DetectionResultItem(BaseModel):
-    id: str
-    result: str  # "real" 或 "fake"
-    confidence: float
-    timestamp: str
-    processing_time: int  # 毫秒
-
-
-class BatchDetectionResult(BaseModel):
-    results: list[DetectionResultItem]
-    total_count: int
-    real_count: int
-    fake_count: int
-    average_confidence: float
-
-
 @router.post("/single", response_model=BatchDetectionResult)
-async def detect_single_mode(request: SingleModeRequest):
-    # 这里实现推理逻辑
-    # 目前返回一个示例响应
-    dummy_item = DetectionResultItem(
-        id="0",
-        result="real",
-        confidence=0.95,
-        timestamp="2026-02-12T10:30:00Z",
-        processing_time=45,
-    )
-    response = BatchDetectionResult(
-        results=[dummy_item],
-        total_count=1,
-        real_count=1,
-        fake_count=0,
-        average_confidence=0.95,
-    )
-    return response
+async def detect_single_mode(
+    request: SingleModeRequest,
+    service: InferServiceDep,
+):
+    """单模态推理端点"""
+    # 解码所有图像
+    images = [decode_base64_image(img_base64) for img_base64 in request.images]
+
+    # 调用服务层进行批量检测
+    batch_results = service.detect_single_batch(images)
+
+    # 构建并返回结果
+    return build_batch_detection_result(batch_results)
 
 
 @router.post("/fusion", response_model=BatchDetectionResult)
-async def detect_fusion_mode(request: FusionModeRequest):
-    # 这里实现融合模式推理逻辑
-    # 目前返回一个示例响应
-    dummy_item = DetectionResultItem(
-        id="0",
-        result="fake",
-        confidence=0.88,
-        timestamp="2026-02-12T10:30:00Z",
-        processing_time=52,
-    )
-    response = BatchDetectionResult(
-        results=[dummy_item],
-        total_count=1,
-        real_count=0,
-        fake_count=1,
-        average_confidence=0.88,
-    )
-    return response
+async def detect_fusion_mode(
+    request: FusionModeRequest,
+    service: InferServiceDep,
+):
+    """融合模态推理端点"""
+    # 解码所有图像对
+    image_pairs = [
+        (decode_base64_image(pair.rgb), decode_base64_image(pair.ir))
+        for pair in request.pairs
+    ]
 
+    # 调用服务层进行批量检测
+    batch_results = service.detect_fusion_batch(image_pairs)
 
-@router.post("/batch", response_model=BatchDetectionResult)
-async def batch_detect(request: BatchDetectRequest):
-    # 这里实现批量检测推理逻辑
-    # 目前返回一个示例响应
-    total = len(request.image_paths)
-    results: list[DetectionResultItem] = []
-    real_count = 0
-    fake_count = 0
-
-    for i, _ in enumerate(request.image_paths):
-        is_real = i % 2 == 0
-        result = DetectionResultItem(
-            id=str(i),
-            result="real" if is_real else "fake",
-            confidence=0.92 if is_real else 0.87,
-            timestamp="2026-02-12T10:30:00Z",
-            processing_time=40 + i * 2,
-        )
-        results.append(result)
-        if is_real:
-            real_count += 1
-        else:
-            fake_count += 1
-
-    avg_confidence = (
-        sum(r.confidence for r in results) / len(results) if results else 0.0
-    )
-
-    response = BatchDetectionResult(
-        results=results,
-        total_count=total,
-        real_count=real_count,
-        fake_count=fake_count,
-        average_confidence=avg_confidence,
-    )
-    return response
+    # 构建并返回结果
+    return build_batch_detection_result(batch_results)

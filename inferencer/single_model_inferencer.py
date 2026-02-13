@@ -1,4 +1,4 @@
-from base_inferencer import (
+from inferencer.base_inferencer import (
     BaseInferencer,
     ModelFormat
 )
@@ -7,9 +7,8 @@ import numpy as np
 import cv2
 from typing import Any
 import torch
-from torch import (
-    Tensor
-)
+from torch import Tensor
+
 
 class SingleModalInferencer(BaseInferencer):
     """
@@ -49,7 +48,6 @@ class SingleModalInferencer(BaseInferencer):
     
     def _load_pytorch_model(self):
         """加载PyTorch模型"""
-        import torch
         import torch.nn as nn
         from util.model import get_model
         

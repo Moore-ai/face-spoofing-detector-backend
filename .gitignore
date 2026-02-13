@@ -1,2 +1,6 @@
 .venv
 **/__pycache__/
+logs
+.env
+
+AGENTS.md
