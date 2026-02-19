@@ -8,6 +8,7 @@ from typing import List, Optional
 
 
 class DetectionResultItem(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
 
     mode: str
     result: str  # "real" 或 "fake"

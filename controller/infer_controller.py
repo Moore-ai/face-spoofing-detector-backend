@@ -102,9 +102,7 @@ async def run_single_detection_task(
         )
 
     finally:
-        # 延迟清理
-        await asyncio.sleep(60)
-        progress_tracker.cleanup_task(task_id)
+        # 立即清理连接映射，任务数据持久保存供查询
         connection_manager.unregister_task(task_id)
 
 
@@ -172,9 +170,7 @@ async def run_fusion_detection_task(
         )
 
     finally:
-        # 延迟清理
-        await asyncio.sleep(60)
-        progress_tracker.cleanup_task(task_id)
+        # 立即清理连接映射，任务数据持久保存供查询
         connection_manager.unregister_task(task_id)
 
 
