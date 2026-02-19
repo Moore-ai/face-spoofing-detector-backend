@@ -4,3 +4,5 @@ logs
 .env
 
 AGENTS.md
+CLAUDE.md
+.claude/**

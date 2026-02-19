@@ -5,6 +5,9 @@
 
 import numpy as np
 from typing import Tuple
+import time
+
+from schemas.detection import DetectionResultItem
 
 
 def _parse_prediction_result(
@@ -58,56 +61,28 @@ def is_living(
 
 def parse_single_prediction(
     logits: np.ndarray,
+    start_time: float,
     threshold: float = 0.5,
-) -> dict:
-    """
-    解析单模态预测结果（详细版本）
-
-    Args:
-        logits: 模型原始输出
-        threshold: 判定阈值
-
-    Returns:
-        包含以下字段的字典:
-        - is_living: 是否为活体
-        - confidence: 置信度
-        - predicted_class: 预测类别 (0=非活体, 1=活体)
-        - probabilities: 各类别概率
-        - logits: 原始logits
-    """
+) -> DetectionResultItem:
     predicted_class, confidence, probabilities = _parse_prediction_result(logits)
     live_flag = predicted_class == 1 and confidence >= threshold
 
-    return {
-        "is_living": live_flag,
-        "confidence": confidence,
-        "predicted_class": predicted_class,
-        "class_name": "living" if predicted_class == 1 else "spoofing",
-        "probabilities": probabilities.tolist(),
-        "logits": logits.flatten().tolist(),
-    }
+    processing_time = int((time.time() - start_time) * 1000)
+
+    return DetectionResultItem(
+        mode="single",
+        result="real" if live_flag else "fake",
+        confidence=confidence,
+        probabilities=probabilities,
+        processing_time=processing_time,
+    )
 
 
 def parse_fusion_prediction(
     logits: np.ndarray,
+    start_time: float,
     threshold: float = 0.5,
-) -> dict:
-    """
-    解析融合模态预测结果（详细版本）
-
-    Args:
-        logits: 模型原始输出
-        threshold: 判定阈值
-
-    Returns:
-        包含以下字段的字典:
-        - is_living: 是否为活体
-        - confidence: 置信度
-        - predicted_class: 预测类别 (0=非活体, 1=活体)
-        - probabilities: 各类别概率
-        - logits: 原始logits
-        - fusion_mode: 融合模态标识
-    """
-    result = parse_single_prediction(logits, threshold)
-    result["fusion_mode"] = "rgb_ir"
+) -> DetectionResultItem:
+    result = parse_single_prediction(logits, start_time, threshold)
+    result.mode = "fusion"
     return result
