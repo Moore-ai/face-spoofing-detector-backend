@@ -310,7 +310,7 @@ Address already in use
 
 ## 许可证
 
-[MIT License](LICENSE)
+[Apache License 2.0](LICENSE)
 
 ## 贡献
 
