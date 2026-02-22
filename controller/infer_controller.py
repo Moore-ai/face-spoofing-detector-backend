@@ -56,15 +56,15 @@ async def run_single_detection_task(
             decoded_images.append(decode_base64_image(img_base64))
 
         # 定义进度回调函数
-        def progress_callback(current: int, total: int, result: DetectionResultItem) -> None:
-            progress_tracker.update_progress(
+        async def progress_callback(current: int, total: int, result: DetectionResultItem) -> None:
+            await progress_tracker.update_progress(
                 task_id=task_id,
                 result=result,
                 message=f"完成第 {current}/{total} 张图片的推理",
             )
 
         # 批量检测（带进度回调）
-        batch_results = infer_service.detect_single_batch(
+        batch_results = await infer_service.detect_single_batch(
             decoded_images, progress_callback=progress_callback
         )
         logger.info(f"单模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 张图片")
@@ -85,8 +85,8 @@ async def run_single_detection_task(
         )
 
     except Exception as e:
-        progress_tracker.fail_task(task_id, str(e))
-        logger.error(f"单模态检测任务 {task_id} 失败: {e}", exc_info=True)
+        await progress_tracker.fail_task(task_id, str(e))
+        logger.error(f"单模态检测任务 {task_id} 失败：{e}", exc_info=True)
 
         # 发送失败通知给对应的客户
         await connection_manager.broadcast_by_task(
@@ -103,7 +103,7 @@ async def run_single_detection_task(
 
     finally:
         # 立即清理连接映射，任务数据持久保存供查询
-        connection_manager.unregister_task(task_id)
+        await connection_manager.unregister_task(task_id)
 
 
 async def run_fusion_detection_task(
@@ -123,15 +123,15 @@ async def run_fusion_detection_task(
             )
 
         # 定义进度回调函数
-        def progress_callback(current: int, total: int, result: DetectionResultItem) -> None:
-            progress_tracker.update_progress(
+        async def progress_callback(current: int, total: int, result: DetectionResultItem) -> None:
+            await progress_tracker.update_progress(
                 task_id=task_id,
                 result=result,
                 message=f"完成第 {current}/{total} 对图像的推理",
             )
 
         # 批量检测（带进度回调）
-        batch_results = infer_service.detect_fusion_batch(
+        batch_results = await infer_service.detect_fusion_batch(
             decoded_pairs, progress_callback=progress_callback
         )
 
@@ -153,8 +153,8 @@ async def run_fusion_detection_task(
         )
 
     except Exception as e:
-        progress_tracker.fail_task(task_id, str(e))
-        logger.error(f"融合模态检测任务 {task_id} 失败: {e}", exc_info=True)
+        await progress_tracker.fail_task(task_id, str(e))
+        logger.error(f"融合模态检测任务 {task_id} 失败：{e}", exc_info=True)
 
         # 发送失败通知给对应的客户
         await connection_manager.broadcast_by_task(
@@ -171,7 +171,7 @@ async def run_fusion_detection_task(
 
     finally:
         # 立即清理连接映射，任务数据持久保存供查询
-        connection_manager.unregister_task(task_id)
+        await connection_manager.unregister_task(task_id)
 
 
 @router.post("/single", response_model=AsyncTaskResponse)
@@ -196,12 +196,12 @@ async def detect_single_mode(
         )
 
     # 创建任务
-    task_id = progress_tracker.create_task(total_items=len(request.images))
-    progress_tracker.start_task(task_id)
+    task_id = await progress_tracker.create_task(total_items=len(request.images))
+    await progress_tracker.start_task(task_id)
 
     # 注册任务到客户
-    if not connection_manager.register_task(x_client_id, task_id):
-        progress_tracker.fail_task(task_id, "任务注册失败，该任务可能已被其他客户注册")
+    if not await connection_manager.register_task(x_client_id, task_id):
+        await progress_tracker.fail_task(task_id, "任务注册失败，该任务可能已被其他客户注册")
         return AsyncTaskResponse(
             task_id=task_id,
             message="任务注册失败",
@@ -244,12 +244,12 @@ async def detect_fusion_mode(
         )
 
     # 创建任务
-    task_id = progress_tracker.create_task(total_items=len(request.pairs))
-    progress_tracker.start_task(task_id)
+    task_id = await progress_tracker.create_task(total_items=len(request.pairs))
+    await progress_tracker.start_task(task_id)
 
     # 注册任务到客户
-    if not connection_manager.register_task(x_client_id, task_id):
-        progress_tracker.fail_task(task_id, "任务注册失败，该任务可能已被其他客户注册")
+    if not await connection_manager.register_task(x_client_id, task_id):
+        await progress_tracker.fail_task(task_id, "任务注册失败，该任务可能已被其他客户注册")
         return AsyncTaskResponse(
             task_id=task_id,
             message="任务注册失败",
@@ -296,9 +296,9 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         logger.debug(f"WebSocket 客户端 {client_id} 正常断开连接")
     except Exception as e:
-        logger.error(f"WebSocket 客户端 {client_id} 连接异常: {e}")
+        logger.error(f"WebSocket 客户端 {client_id} 连接异常：{e}")
     finally:
-        connection_manager.disconnect(client_id)
+        await connection_manager.disconnect(client_id)
 
 
 @router.get("/task/{task_id}", response_model=TaskStatusResponse)
@@ -307,7 +307,7 @@ async def get_task_status(task_id: str):
 
     返回任务的当前状态、进度信息和所有检测结果。
     """
-    task = progress_tracker.get_task(task_id)
+    task = await progress_tracker.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
 

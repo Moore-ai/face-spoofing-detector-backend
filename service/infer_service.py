@@ -1,6 +1,7 @@
+import asyncio
 import logging
 import time
-from typing import Tuple, Callable
+from typing import Callable, Awaitable, Tuple
 
 import numpy as np
 
@@ -71,20 +72,20 @@ class InferService:
         """执行融合模态推理"""
         return self.fusion_model_inferencer.predict(rgb_image, ir_image)
 
-    def detect_single_batch(
+    async def detect_single_batch(
         self,
         images: list[np.ndarray],
-        progress_callback: Callable | None = None,
-    ) -> list[Tuple[DetectionResultItem, int]]:
+        progress_callback: Callable[[int, int, DetectionResultItem], Awaitable[None]] | None = None,
+    ) -> list[tuple[DetectionResultItem, int]]:
         """
         批量单模态检测
 
         Args:
             images: 解码后的图像数组列表
-            progress_callback: 进度回调函数，接收 (current_index, total_count) 参数
+            progress_callback: 异步进度回调函数，接收 (current_index, total_count, result) 参数
 
         Returns:
-            每个图像的检测结果列表，每项为 (解析结果字典, 处理时间毫秒)
+            每个图像的检测结果列表，每项为 (解析结果字典，处理时间毫秒)
         """
         results = []
 
@@ -98,24 +99,24 @@ class InferService:
 
             # 调用进度回调
             if progress_callback:
-                progress_callback(i + 1, len(images), parsed)
+                await progress_callback(i + 1, len(images), parsed)
 
         return results
 
-    def detect_fusion_batch(
+    async def detect_fusion_batch(
         self,
         image_pairs: list[Tuple[np.ndarray, np.ndarray]],
-        progress_callback: Callable | None = None,
-    ) -> list[Tuple[DetectionResultItem, int]]:
+        progress_callback: Callable[[int, int, DetectionResultItem], Awaitable[None]] | None = None,
+    ) -> list[tuple[DetectionResultItem, int]]:
         """
         批量融合模态检测
 
         Args:
             image_pairs: 解码后的图像对列表，每项为 (rgb_image, ir_image)
-            progress_callback: 进度回调函数，接收 (current_index, total_count) 参数
+            progress_callback: 异步进度回调函数，接收 (current_index, total_count, result) 参数
 
         Returns:
-            每个图像对的检测结果列表，每项为 (解析结果字典, 处理时间毫秒)
+            每个图像对的检测结果列表，每项为 (解析结果字典，处理时间毫秒)
         """
         results = []
 
@@ -129,6 +130,6 @@ class InferService:
 
             # 调用进度回调
             if progress_callback:
-                progress_callback(i + 1, len(image_pairs), parsed)
+                await progress_callback(i + 1, len(image_pairs), parsed)
 
         return results

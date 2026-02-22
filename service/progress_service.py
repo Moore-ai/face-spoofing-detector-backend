@@ -3,6 +3,7 @@
 管理批量检测任务的进度状态
 """
 
+import asyncio
 import logging
 import time
 import uuid
@@ -82,72 +83,91 @@ class TaskProgress:
 
 
 class ProgressTracker:
-    """进度追踪器"""
+    """进度追踪器（线程安全版本）"""
 
     def __init__(self):
-        # 存储所有任务: {task_id: TaskProgress}
+        # 存储所有任务：{task_id: TaskProgress}
         self.progresses: Dict[str, TaskProgress] = {}
+        # 异步锁保护共享数据
+        self._lock = asyncio.Lock()
 
-    def create_task(self, total_items: int) -> str:
-        """创建新任务"""
-        task_id = str(uuid.uuid4())
-        task = TaskProgress(
-            task_id=task_id,
-            total_items=total_items,
-            status="pending",
-        )
-        self.progresses[task_id] = task
+    async def create_task(self, total_items: int) -> str:
+        """创建新任务（异步安全）"""
+        async with self._lock:
+            task_id = str(uuid.uuid4())
+            task = TaskProgress(
+                task_id=task_id,
+                total_items=total_items,
+                status="pending",
+            )
+            self.progresses[task_id] = task
         logger.info(f"创建任务 {task_id}, 总计 {total_items} 项")
         return task_id
 
-    def get_task(self, task_id: str) -> Optional[TaskProgress]:
-        """获取任务状态"""
-        return self.progresses.get(task_id)
+    async def get_task(self, task_id: str) -> Optional[TaskProgress]:
+        """获取任务状态（异步安全）"""
+        async with self._lock:
+            return self.progresses.get(task_id)
 
-    def start_task(self, task_id: str) -> None:
-        """开始任务"""
-        if task_id in self.progresses:
-            self.progresses[task_id].status = "running"
-            self.progresses[task_id].start_time = time.time()
-            logger.info(f"任务 {task_id} 开始执行")
+    async def start_task(self, task_id: str) -> None:
+        """开始任务（异步安全）"""
+        async with self._lock:
+            if task_id in self.progresses:
+                self.progresses[task_id].status = "running"
+                self.progresses[task_id].start_time = time.time()
+        logger.info(f"任务 {task_id} 开始执行")
 
-    def update_progress(
+    async def update_progress(
         self,
         task_id: str,
         result: DetectionResultItem,
         message: str = "",
     ) -> None:
-        """更新当前处理的项"""
-        if task_id not in self.progresses:
-            return
+        """更新当前处理的项（异步安全）"""
+        async with self._lock:
+            if task_id not in self.progresses:
+                return
 
-        task = self.progresses[task_id]
-        task.set_result(result)
-        if message:
+            task = self.progresses[task_id]
+            task.set_result(result)
+            if message:
+                task.message = message
+
+            if task.completed_items == task.total_items:
+                task.status = "completed"
+                task.end_time = time.time()
+
+            # 在锁内复制任务数据用于通知
+            task_copy = TaskProgress(
+                task_id=task.task_id,
+                total_items=task.total_items,
+                completed_items=task.completed_items,
+                status=task.status,
+                current_result=task.current_result,
+                all_results=task.all_results.copy(),
+                real_count=task.real_count,
+                fake_count=task.fake_count,
+                start_time=task.start_time,
+                end_time=task.end_time,
+                message=task.message,
+            )
+
+        self._notify_progress(task_copy)
+
+    async def fail_task(self, task_id: str, message: str) -> None:
+        """标记任务失败（异步安全）"""
+        async with self._lock:
+            if task_id not in self.progresses:
+                return
+
+            task = self.progresses[task_id]
+            task.status = "failed"
             task.message = message
-
-        if task.completed_items == task.total_items:
-            task.status = "completed"
             task.end_time = time.time()
-
-        self._notify_progress(task)
-
-    def fail_task(self, task_id: str, message: str) -> None:
-        """标记任务失败"""
-        if task_id not in self.progresses:
-            return
-
-        task = self.progresses[task_id]
-        task.status = "failed"
-        task.message = message
-        task.end_time = time.time()
-        logger.error(f"任务 {task_id} 失败: {message}")
+        logger.error(f"任务 {task_id} 失败：{message}")
 
     def _notify_progress(self, task: TaskProgress) -> None:
         """通知进度更新（WebSocket + 回调）"""
-        if task.task_id not in self.progresses:
-            return
-
         msg = {
             "type": "progress_update",
             "data": task.to_dict(),
@@ -155,16 +175,15 @@ class ProgressTracker:
 
         # WebSocket 广播
         try:
-            import asyncio
-
             asyncio.create_task(connection_manager.broadcast_by_task(msg, task.task_id))
         except Exception as e:
-            logger.error(f"WebSocket 广播失败: {e}")
+            logger.error(f"WebSocket 广播失败：{e}")
 
-    def cleanup_task(self, task_id: str) -> None:
-        """清理完成的任务数据"""
-        if task_id in self.progresses:
-            del self.progresses[task_id]
+    async def cleanup_task(self, task_id: str) -> None:
+        """清理完成的任务数据（异步安全）"""
+        async with self._lock:
+            if task_id in self.progresses:
+                del self.progresses[task_id]
         logger.debug(f"清理任务 {task_id}")
 
 
