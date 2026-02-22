@@ -41,7 +41,35 @@ uv sync
 uv pip install -e .
 ```
 
-### 2. 配置环境
+### 2. 使用自动化脚本配置环境（推荐）
+
+我们提供了针对不同操作系统的自动化配置脚本，可一键完成环境配置：
+
+#### Windows:
+```cmd
+scripts/setup_env_windows.bat
+```
+
+#### Linux/macOS:
+```bash
+# 使脚本可执行
+chmod +x scripts/setup_env_*.sh
+
+# 运行对应系统的脚本
+./scripts/setup_env_linux.sh    # Linux
+./scripts/setup_env_macos.sh    # macOS
+```
+
+脚本会自动：
+- 检查Python版本
+- 安装uv包管理器（如未安装）
+- 创建虚拟环境
+- 安装项目依赖
+- 从.env.example创建.env配置文件
+
+### 3. 手动配置环境（可选）
+
+如果您不想使用自动化脚本，也可以手动配置环境：
 
 ```bash
 # 复制示例配置文件
