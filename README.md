@@ -2,18 +2,30 @@
 
 基于 FastAPI 的人脸活体检测（Face Anti-Spoofing）推理服务，支持单模态和融合模态图像检测，提供实时进度推送和异步任务管理。
 
+**部署架构**：
+- **前端**：Tauri 桌面应用（React + Rust），部署在用户端
+- **后端**：Python FastAPI 推理服务，集中部署
+- **多客户端**：支持多个桌面客户端同时连接后端服务
+
+**认证系统**：
+- 采用**激活码模式**，用户输入激活码换取 API Key
+- 支持 API Key 认证（客户端请求）和 JWT Token（管理后台）
+- 速率限制防止 API 滥用
+
 ## 功能特性
 
 - **多模态支持**：支持单模态（RGB/IR）和融合模态（RGB+IR）检测
 - **多模型格式**：支持 PyTorch (.pth)、ONNX (.onnx)、RKNN (.rknn) 模型
 - **RESTful API**：基于 FastAPI 构建，支持异步处理
-- **WebSocket实时推送**：实时推送任务进度更新和完成通知
+- **WebSocket 实时推送**：实时推送任务进度更新和完成通知
 - **异步任务管理**：后台批量处理，支持任务状态查询
 - **进度追踪服务**：实时统计任务进度、结果数量和分类
 - **灵活配置**：通过环境变量或 `.env` 文件配置所有参数
 - **完整日志**：详细的日志记录，支持文件和控制台双输出
 - **全局异常处理**：统一的错误处理和日志记录机制
 - **依赖注入架构**：模块化设计，易于测试和维护
+- **认证与授权**：激活码模式，支持多客户端管理和权限控制
+- **速率限制**：防止 API 滥用，保护服务稳定性
 
 ## 技术栈
 
@@ -24,7 +36,7 @@
 - **实时通信**：WebSocket（进度推送）
 - **数据验证**：Pydantic（类型安全）
 - **配置管理**：pydantic-settings（环境变量）
-- **日志系统**：Python logging（文件+控制台）
+- **日志系统**：Python logging（文件 + 控制台）
 - **测试框架**：pytest（单元测试和集成测试）
 - **API 文档**：Swagger UI、ReDoc（自动生成）
 - **依赖管理**：uv（推荐）或 pip
@@ -61,11 +73,11 @@ chmod +x scripts/setup_env_*.sh
 ```
 
 脚本会自动：
-- 检查Python版本
-- 安装uv包管理器（如未安装）
+- 检查 Python 版本
+- 安装 uv 包管理器（如未安装）
 - 创建虚拟环境
 - 安装项目依赖
-- 从.env.example创建.env配置文件
+- 从.env.example 创建.env 配置文件
 
 ### 3. 手动配置环境（可选）
 
@@ -81,7 +93,7 @@ notepad .env  # Windows
 vim .env      # Linux/Mac
 ```
 
-### 3. 准备模型
+### 4. 准备模型
 
 将训练好的模型文件放入 `models/` 目录：
 
@@ -96,16 +108,16 @@ models/
 - `.onnx` - ONNX 模型
 - `.rknn` - RKNN 模型（嵌入式设备）
 
-### 4. 启动服务
+### 5. 启动服务
 
 ```bash
-# 方式1：直接运行（生产模式）
+# 方式 1：直接运行（生产模式）
 python main.py
 
-# 方式2：使用 uv
+# 方式 2：使用 uv
 uv run python main.py
 
-# 方式3：开发模式（支持热重载）
+# 方式 3：开发模式（支持热重载）
 uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -145,18 +157,116 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 |--------|--------|------|
 | `LOG_LEVEL` | `INFO` | 日志级别：`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` |
 
-### 环境变量示例
+### 认证配置（新增）
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `JWT_SECRET_KEY` | `your-secret-key...` | JWT 密钥（生产环境务必修改） |
+| `JWT_EXPIRATION_HOURS` | `24` | JWT Token 过期时间（小时） |
+| `ADMIN_USERNAME` | `admin` | 管理员账户（用于管理后台） |
+| `ADMIN_PASSWORD` | `your-admin-password...` | 管理员密码（生产环境务必修改） |
+| `DEFAULT_API_KEY` | `dev_api_key...` | 默认 API Key（仅开发环境） |
+| `DEFAULT_ACTIVATION_CODE` | `ACT-DEV-DEFAULT-KEY` | 默认激活码（仅开发环境） |
+
+## 认证系统使用指南
+
+### 激活码模式流程
+
+```
+1. 管理员生成激活码 → 2. 用户输入激活码 → 3. 换取 API Key → 4. 后续请求携带 API Key
+```
+
+### 1. 管理员生成激活码
 
 ```bash
-# 使用 CPU 推理
-DEVICE=cpu python main.py
+# 1. 获取 JWT Token（管理员登录）
+curl -X POST http://127.0.0.1:8000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123"}'
 
-# 指定不同端口
-PORT=8080 python main.py
-
-# 开发模式（详细日志）
-LOG_LEVEL=DEBUG python main.py
+# 2. 使用 Token 生成激活码
+# 注意：max_uses 是必需字段，必须 >= 1
+curl -X POST http://127.0.0.1:8000/auth/activation-codes \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "user_001",
+    "max_uses": 100,
+    "expires_in_hours": 720
+  }'
 ```
+
+**参数说明**：
+- `name`: 激活码名称/描述（可选）
+- `max_uses`: **最大使用次数（必需，必须 >= 1）**
+- `expires_in_hours`: 过期时间（小时，可选，None 表示永不过期）
+- `permissions`: 权限列表（可选，默认 ["read", "write"]）
+
+### 2. 用户激活客户端
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/activate \
+  -H "Content-Type: application/json" \
+  -d '{"code": "ACT-XXXXX-YYYYY"}'
+```
+
+响应：
+```json
+{
+  "api_key": "sk_xxxxx...",
+  "message": "激活成功"
+}
+```
+
+### 3. 使用 API Key 访问推理端点
+
+```bash
+# 单模态推理
+curl -H "X-API-Key: sk_xxxxx..." \
+  -X POST http://127.0.0.1:8000/infer/single \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "single", "modality": "rgb", "images": [...]}'
+
+# 融合模态推理
+curl -H "X-API-Key: sk_xxxxx..." \
+  -X POST http://127.0.0.1:8000/infer/fusion \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "fusion", "pairs": [{"rgb": "base64_rgb", "ir": "base64_ir"}]}'
+
+# 查询任务状态
+curl -H "X-API-Key: sk_xxxxx..." \
+  http://127.0.0.1:8000/infer/task/{task_id}
+```
+
+## API 接口
+
+### 认证相关端点
+
+| 端点 | 方法 | 说明 | 认证要求 |
+|------|------|------|----------|
+| `/auth/token` | POST | 获取 JWT Token（管理员登录） | 无 |
+| `/auth/activate` | POST | 激活码换取 API Key | 无 |
+| `/auth/me` | GET | 获取当前用户信息 | 需要认证 |
+| `/auth/refresh` | POST | 刷新 Token | 需要 Token |
+| `/auth/activation-codes` | GET | 列出所有激活码 | 需要 admin |
+| `/auth/activation-codes` | POST | 创建新激活码 | 需要 admin |
+| `/auth/activation-codes/{code}` | PUT | 更新激活码配置 | 需要 admin |
+| `/auth/activation-codes/{code}` | DELETE | 删除激活码 | 需要 admin |
+| `/auth/activation-codes/{code}/deactivate` | POST | 禁用激活码 | 需要 admin |
+
+**注意**：
+- `max_uses` 是创建激活码时的必需字段，必须 >= 1
+- 激活码达到使用次数上限后自动失效
+
+### 推理相关端点
+
+| 端点 | 方法 | 说明 | 认证要求 |
+|------|------|------|----------|
+| `/infer/single` | POST | 单模态检测 | **需要 API Key** |
+| `/infer/fusion` | POST | 融合模态检测 | **需要 API Key** |
+| `/infer/ws` | WebSocket | 实时进度推送 | 内置认证 |
+| `/infer/task/{task_id}` | GET | 查询任务状态 | **需要 API Key** |
+| `/health` | GET | 健康检查 | 无 |
 
 ## 实时进度推送
 
@@ -210,228 +320,53 @@ GET /infer/ws
 }
 ```
 
-### 任务完成通知
-
-任务完成后推送：
-
-```json
-{
-  "type": "task_completed",
-  "data": {
-    "task_id": "task_123456",
-    "status": "completed",
-    "message": "任务已完成，可查询检测结果",
-    "total_items": 10,
-    "processed_items": 10
-  }
-}
-```
-
-### 任务失败通知
-
-任务失败时推送：
-
-```json
-{
-  "type": "task_failed",
-  "data": {
-    "task_id": "task_123456",
-    "status": "failed",
-    "message": "图像解码失败"
-  }
-}
-```
-
-## API 接口
-
-### 1. 单模态检测（异步）
-
-**请求**
-
-```http
-POST /infer/single
-Content-Type: application/json
-X-Client-ID: 550e8400-e29b-41d4-a716-446655440000
-
-{
-  "mode": "single",
-  "modality": "rgb",
-  "images": ["base64_encoded_image_1", "base64_encoded_image_2"]
-}
-```
-
-> **注意**：需要先建立 WebSocket 连接获取 `client_id`，并通过 `X-Client-ID` 请求头传入。
-
-**响应**
-
-```json
-{
-  "task_id": "task_123456",
-  "message": "单模态检测任务已创建，正在后台处理"
-}
-```
-
-### 2. 融合模态检测（异步）
-
-**请求**
-
-```http
-POST /infer/fusion
-Content-Type: application/json
-X-Client-ID: 550e8400-e29b-41d4-a716-446655440000
-
-{
-  "mode": "fusion",
-  "pairs": [
-    {
-      "rgb": "base64_encoded_rgb_image",
-      "ir": "base64_encoded_ir_image"
-    }
-  ]
-}
-```
-
-**响应**
-
-```json
-{
-  "task_id": "task_123456",
-  "message": "融合模态检测任务已创建，正在后台处理"
-}
-```
-
-### 3. 任务状态查询
-
-**请求**
-
-```http
-GET /infer/task/{task_id}
-```
-
-**响应**
-
-```json
-{
-  "task_id": "task_123456",
-  "status": "completed",
-  "total_items": 10,
-  "completed_items": 10,
-  "progress_percentage": 100.0,
-  "real_count": 8,
-  "fake_count": 2,
-  "elapsed_time_ms": 4500,
-  "message": "任务已完成",
-  "results": [
-    {
-      "mode": "single",
-      "result": "real",
-      "confidence": 0.92,
-      "probabilities": [0.92, 0.08],
-      "processing_time": 45
-    }
-  ],
-  "current_result": {
-    "mode": "single",
-    "result": "real",
-    "confidence": 0.92,
-    "probabilities": [0.92, 0.08],
-    "processing_time": 45
-  }
-}
-```
-
-> **注意**：`results` 字段仅在任务状态为 `completed` 或 `failed` 时返回。
-
-### 4. 健康检查
-
-```http
-GET /health
-```
-
 ## 项目结构
 
 ```
 backend/
 ├── main.py                      # 应用入口点，包含全局异常处理
 ├── lifespan.py                  # 应用生命周期管理，依赖注入配置
-├── router.py                    # 路由注册和设置
+├── router.py                    # 路由注册
 ├── controller/                  # FastAPI 控制器（API 端点）
 │   ├── health_controller.py     # 健康检查端点
-│   └── infer_controller.py      # 推理接口（单模态/融合模态/WebSocket）
+│   ├── infer_controller.py      # 推理接口（单模态/融合模态/WebSocket）
+│   ├── auth_controller.py       # 认证路由（JWT Token、API Key）
+│   └── activation_controller.py # 激活码路由
 ├── service/                     # 业务逻辑层
 │   ├── infer_service.py         # 主推理服务，协调控制器和推理器
-│   └── progress_service.py      # 进度追踪服务，管理批量检测任务进度
+│   └── progress_service.py      # 进度追踪服务
 ├── inferencer/                  # 模型推理实现层
 │   ├── base_inferencer.py       # 抽象基类，定义推理接口
-│   ├── inferencer_factory.py    # 工厂类，根据模型格式创建推理器实例
+│   ├── inferencer_factory.py    # 工厂类，创建推理器实例
 │   ├── single_model_inferencer.py   # 单模态推理器
 │   └── fusion_model_inferencer.py   # 融合模态推理器
 ├── util/                        # 工具模块
-│   ├── config.py                # 配置管理（基于pydantic-settings）
-│   ├── logger.py                # 日志配置，支持文件和控制台输出
+│   ├── config.py                # 配置管理
+│   ├── logger.py                # 日志配置
 │   ├── result_parser.py         # 模型输出解析器
-│   ├── websocket_manager.py     # WebSocket 连接管理，客户端映射
-│   └── model/                   # 模型架构定义（MobileNetV2）
+│   ├── websocket_manager.py     # WebSocket 连接管理
+│   ├── auth.py                  # 认证工具（API Key、JWT、激活码）
+│   └── model/                   # 模型架构定义
 ├── schemas/                     # 数据模型（Pydantic）
-│   └── detection.py             # 检测请求/响应数据模型
+│   ├── detection.py             # 检测请求/响应
+│   ├── auth.py                  # 认证相关模型
+│   └── activation.py            # 激活码相关模型
+├── middleware/                  # 中间件
+│   ├── auth_middleware.py       # 认证中间件
+│   └── rate_limiter.py          # 速率限制中间件
 ├── tests/                       # 测试文件
-│   └── test_websocket_client.py # WebSocket 客户端测试脚本
+│   ├── README.md                # 测试使用指南
+│   ├── test_auth.py             # 认证系统完整测试
+│   ├── test_infer.py            # 推理功能测试
+│   ├── test_activation.py       # 激活码测试
+│   └── test_websocket_client.py # WebSocket 测试
+├── docs/                        # 文档
+│   └── ADR-001_认证系统架构决策.md
 ├── models/                      # 模型文件存储（.gitignore）
-├── logs/                        # 日志文件，按启动时间命名
+├── logs/                        # 日志文件
 ├── .env                         # 环境变量配置（本地，不提交）
-└── .env.example                 # 环境变量示例模板
+└── .env.example                 # 环境变量示例
 ```
-
-## 架构说明
-
-### 依赖注入架构
-- **lifespan.py**: 应用生命周期管理，初始化全局服务实例
-- **依赖注入**: 使用 FastAPI `Depends` 注入 `InferService` 和 `ConnectionManager`
-- **工厂模式**: `InferencerFactory` 根据模型格式创建相应推理器
-- **分层架构**: Controllers → Services → Inferencers → Utilities
-
-### 实时进度推送系统
-1. **WebSocket 连接**: 客户端连接到 `/infer/ws` 获取 `client_id`
-2. **任务注册**: 检测请求使用 `client_id` 注册任务到对应客户端
-3. **进度追踪**: `ProgressTracker` 管理任务状态和统计信息
-4. **实时推送**: `WebSocketManager` 向特定客户端广播进度更新
-5. **状态查询**: 支持通过 REST API 查询任务状态和结果
-
-### 任务生命周期
-1. **pending**: 任务创建，等待执行
-2. **running**: 任务开始执行，接收进度更新
-3. **completed**: 任务完成，包含所有检测结果
-4. **failed**: 任务失败，包含错误信息
-
-### 异步处理流程
-1. 客户端建立 WebSocket 连接
-2. 提交检测请求（单模态/融合模态）
-3. 立即返回 `task_id`，后台异步处理
-4. 实时接收进度更新（WebSocket）
-5. 任务完成后可通过 REST API 查询完整结果
-
-## 日志说明
-
-日志文件存储在 `logs/` 目录下，文件名包含启动时间：
-
-```
-logs/
-├── 2026-02-13_14-30-52.log     # 示例：2026年2月13日 14:30:52 启动
-└── 2026-02-13_15-21-08.log
-```
-
-日志级别：
-- **ERROR** - 错误信息（模型加载失败、未处理异常等）
-- **WARNING** - 警告信息（HTTP 4xx 错误等）
-- **INFO** - 一般信息（服务启动、模型加载成功、请求处理等）
-- **DEBUG** - 调试信息（开发模式使用）
-
-日志包含内容：
-- 时间戳
-- 模块名
-- 日志级别
-- 详细消息
-- 异常堆栈（ERROR 级别）
 
 ## 开发指南
 
@@ -460,9 +395,8 @@ ruff format .
 
 ### 运行测试
 
-#### 单元测试
 ```bash
-# 运行所有测试
+# 使用 pytest 运行所有测试
 pytest
 
 # 详细输出
@@ -472,37 +406,33 @@ pytest -v
 pytest --cov=.
 
 # 运行特定测试文件
+pytest tests/test_activation.py
 pytest tests/test_websocket_client.py
+pytest tests/test_auth.py
+pytest tests/test_infer.py
 ```
 
-#### WebSocket 集成测试
-服务启动后，运行 WebSocket 客户端测试：
+### 运行测试脚本（直接运行）
 
 ```bash
-# 基本测试（需要服务运行在默认地址）
+# 认证系统完整测试（需要服务运行）
+python tests/test_auth.py
+
+# 推理功能测试（需要服务运行 + API Key 配置）
+python tests/test_infer.py
+
+# 激活码单元测试（无需服务运行）
+python tests/test_activation.py
+
+# WebSocket 客户端测试
 python tests/test_websocket_client.py
-
-# 指定服务器地址
-python tests/test_websocket_client.py --url http://192.168.1.100:8000
-
-# 跳过部分测试场景
-python tests/test_websocket_client.py --skip-fusion --skip-errors
-
-# 详细输出和长超时
-python tests/test_websocket_client.py --verbose --timeout 30.0
-
-# 显示帮助信息
-python tests/test_websocket_client.py --help
 ```
 
-#### 测试功能覆盖
-- ✅ WebSocket 连接和 client_id 分配
-- ✅ 无效客户端 ID 验证
-- ✅ 单模态检测任务创建和进度推送
-- ✅ 融合模态检测任务创建和进度推送
-- ✅ 任务状态查询 API
-- ✅ 错误场景处理（无效 base64、无效 modality 等）
-- ✅ 服务健康检查
+**测试说明**：
+- `tests/test_auth.py` - 认证系统完整测试（JWT、激活码、API Key、WebSocket 连接）
+- `tests/test_infer.py` - 推理功能测试（单模态、融合模态、任务查询、进度推送）
+- `tests/test_activation.py` - 激活码单元测试（离线测试）
+- `tests/README.md` - 测试使用指南
 
 ## 注意事项
 
@@ -513,67 +443,10 @@ python tests/test_websocket_client.py --help
 5. **并发处理**：服务基于 FastAPI，支持异步并发处理请求
 6. **WebSocket 连接**：检测请求需要先建立 WebSocket 连接获取 `client_id`
 7. **任务持久存储**：任务完成后数据持久保存，可随时查询历史任务
-8. **客户端映射**：每个 WebSocket 连接对应一个客户端，断开连接后任务不再推送
-
-## 故障排查
-
-### 1. 模型文件不存在
-
-```
-ERROR - Model file not found: models/single_model.pth
-```
-
-**解决**：将模型文件放入 `models/` 目录，或修改 `.env` 中的路径配置
-
-### 2. CUDA 不可用
-
-```
-CUDA is not available, using CPU
-```
-
-**解决**：安装 CUDA 版本的 PyTorch，或在 `.env` 中设置 `DEVICE=cpu`
-
-### 3. 端口被占用
-
-```
-Address already in use
-```
-
-**解决**：修改 `.env` 中的 `PORT` 为其他端口，或关闭占用该端口的程序
-
-### 4. WebSocket 连接失败
-
-```
-Connection refused / Cannot connect to WebSocket
-```
-
-**解决**：
-- 确保服务已启动并运行在正确的地址和端口
-- 检查防火墙设置，确保 WebSocket 端口可访问
-- 验证 URL 格式：`ws://localhost:8000/infer/ws`（HTTP）或 `wss://...`（HTTPS）
-
-### 5. 无效的 client_id 错误
-
-```
-无效的 client_id: xxx，请先建立 WebSocket 连接
-```
-
-**解决**：
-1. 先连接到 `/infer/ws` WebSocket 端点
-2. 接收 `client_id`（包含在 `connected` 消息中）
-3. 通过 `X-Client-ID` 请求头传入 `client_id`
-
-### 6. 任务状态查询返回 404
-
-```
-任务不存在或已过期
-```
-
-**解决**：
-- 确保使用正确的 `task_id`（任务ID区分大小写）
-- 检查任务是否已成功创建（可能创建失败）
-- 验证任务是否处于 pending、running、completed 或 failed 状态
-- 注意：任务数据持久保存，不会自动清理
+8. **API Key 安全**：
+   - 生产环境务必修改默认配置
+   - 定期轮换激活码
+   - 禁用不再使用的激活码
 
 ## 许可证
 

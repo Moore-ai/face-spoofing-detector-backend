@@ -6,3 +6,8 @@ logs
 AGENTS.md
 CLAUDE.md
 .claude/**
+AUTH.md
+IMPLEMENTATION_AUTH.md
+REQUIREMENTS.md
+memory/**
+docs/**
