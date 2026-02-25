@@ -51,6 +51,18 @@ class Config:
     # 模型输入尺寸
     INPUT_SIZE: int = int(os.getenv("INPUT_SIZE", "112"))
 
+    # 认证与安全配置
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+    JWT_EXPIRATION_HOURS: int = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
+    ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "your-admin-password-change-in-production")
+    DEFAULT_ACTIVATION_CODE: str = os.getenv("DEFAULT_ACTIVATION_CODE", "ACT-DEV-DEFAULT-KEY")
+
+    # 调试模式配置
+    DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
+    DEBUG_DELAY_PER_IMAGE: float = float(os.getenv("DEBUG_DELAY_PER_IMAGE", "0.5"))
+    DEBUG_DELAY_PER_PAIR: float = float(os.getenv("DEBUG_DELAY_PER_PAIR", "0.8"))
+
 
 # 导出配置实例
 settings = Config()

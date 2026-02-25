@@ -1,37 +1,41 @@
+"""
+推理路由控制器
+
+提供以下端点：
+- POST /infer/single - 单模态检测
+- POST /infer/fusion - 融合模态检测
+- GET /infer/task/{task_id} - 查询任务状态
+- WebSocket /infer/ws - 实时进度推送
+"""
+
 import asyncio
 import base64
 import io
 import logging
 
 import numpy as np
-from fastapi import APIRouter, WebSocket, BackgroundTasks, Header, HTTPException
+from fastapi import APIRouter, WebSocket, BackgroundTasks, Header, HTTPException, Depends
 from PIL import Image
-from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
+from typing import Annotated
+
 from lifespan import InferServiceDep, ConnectionManagerDep
-from schemas.detection import AsyncTaskResponse, DetectionResultItem, TaskStatusResponse
+from schemas.detection import (
+    AsyncTaskResponse,
+    DetectionResultItem,
+    TaskStatusResponse,
+    SingleModeRequest,
+    ImagePair,
+    FusionModeRequest,
+)
 from service.progress_service import progress_tracker
+from util.auth import AuthCredentials
+from middleware.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-class SingleModeRequest(BaseModel):
-    mode: str
-    modality: str
-    images: list[str]
-
-
-class ImagePair(BaseModel):
-    rgb: str
-    ir: str
-
-
-class FusionModeRequest(BaseModel):
-    mode: str
-    pairs: list[ImagePair]
 
 
 def decode_base64_image(base64_str: str) -> np.ndarray:
@@ -180,14 +184,20 @@ async def detect_single_mode(
     background_tasks: BackgroundTasks,
     infer_service: InferServiceDep,
     connection_manager: ConnectionManagerDep,
+    auth: Annotated[AuthCredentials, Depends(get_current_user)],
     x_client_id: str = Header(..., description="WebSocket 分配的客户端 ID"),
 ):
     """单模态推理端点（异步模式）
 
     需要先在 WebSocket 连接中获取 client_id，然后通过 Header 传入。
+    需要 API Key 认证（通过 X-API-Key 请求头或 Authorization: Bearer）。
     立即返回 task_id，后台异步执行检测任务。
     任务进度会自动推送到对应的 WebSocket 客户端。
     """
+    # 验证认证
+    if not auth.authenticated:
+        raise HTTPException(status_code=401, detail="未授权访问，需要 API Key 或 JWT Token")
+
     # 验证 client_id 是否存在
     if x_client_id not in connection_manager.active_connections:
         return AsyncTaskResponse(
@@ -228,14 +238,20 @@ async def detect_fusion_mode(
     background_tasks: BackgroundTasks,
     infer_service: InferServiceDep,
     connection_manager: ConnectionManagerDep,
+    auth: Annotated[AuthCredentials, Depends(get_current_user)],
     x_client_id: str = Header(..., description="WebSocket 分配的客户端 ID"),
 ):
     """融合模态推理端点（异步模式）
 
     需要先在 WebSocket 连接中获取 client_id，然后通过 Header 传入。
+    需要 API Key 认证（通过 X-API-Key 请求头或 Authorization: Bearer）。
     立即返回 task_id，后台异步执行检测任务。
     任务进度会自动推送到对应的 WebSocket 客户端。
     """
+    # 验证认证
+    if not auth.authenticated:
+        raise HTTPException(status_code=401, detail="未授权访问，需要 API Key 或 JWT Token")
+
     # 验证 client_id 是否存在
     if x_client_id not in connection_manager.active_connections:
         return AsyncTaskResponse(
@@ -278,8 +294,19 @@ async def websocket_endpoint(
     """WebSocket 端点 - 实时进度推送
 
     连接建立后，后端生成 client_id 并发送给客户端。
+    支持通过查询参数进行认证：
+    - ?api_key=sk_xxx 或 ?token=jwt_xxx
     任务进度会自动推送给对应客户端，无需订阅。
     """
+    # WebSocket 认证（可选）
+    from middleware.auth_middleware import get_websocket_auth
+    auth = await get_websocket_auth(websocket)
+
+    # 如果提供了认证信息但无效，拒绝连接
+    if (websocket.query_params.get("api_key") or websocket.query_params.get("token")) and not auth.authenticated:
+        await websocket.close(code=4001, reason="未授权访问")
+        return
+
     client_id = await connection_manager.connect(websocket)
 
     await websocket.send_json(
@@ -302,11 +329,19 @@ async def websocket_endpoint(
 
 
 @router.get("/task/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str):
+async def get_task_status(
+    task_id: str,
+    auth: Annotated[AuthCredentials, Depends(get_current_user)],
+):
     """获取任务状态和结果
 
+    需要 API Key 认证。
     返回任务的当前状态、进度信息和所有检测结果。
     """
+    # 验证认证
+    if not auth.authenticated:
+        raise HTTPException(status_code=401, detail="未授权访问，需要 API Key 或 JWT Token")
+
     task = await progress_tracker.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")

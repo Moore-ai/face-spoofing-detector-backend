@@ -9,6 +9,7 @@ from util.logger import setup_logging
 
 from lifespan import lifespan
 from router import register_routers
+from middleware.rate_limiter import RateLimitMiddleware
 
 from util.config import settings
 
@@ -16,6 +17,19 @@ setup_logging(level=getattr(logging, settings.LOG_LEVEL))
 logger = logging.getLogger(__name__)
 
 app = FastAPI(lifespan=lifespan)
+
+# 注册速率限制中间件
+app.add_middleware(RateLimitMiddleware, enabled=True)
+
+# 注册 CORS 中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 生产环境应配置具体域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 register_routers(app)
 
 

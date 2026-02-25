@@ -3,7 +3,9 @@ from fastapi import FastAPI
 
 from controller import (
     health_controller,
-    infer_controller
+    infer_controller,
+    auth_controller,
+    activation_controller,
 )
 
 import logging
@@ -17,10 +19,22 @@ ROUTER_CONFIGS = [
         "dependencies": [],
     },
     {
+        "router": auth_controller.router,
+        "prefix": "/auth",
+        "tag": ["认证"],
+        "dependencies": [],
+    },
+    {
+        "router": activation_controller.router,
+        "prefix": "/auth",
+        "tag": ["激活码"],
+        "dependencies": [],
+    },
+    {
         "router": infer_controller.router,
         "prefix": "/infer",
         "tag": ["模型推理"],
-        "dependencies": [],
+        "dependencies": [],  # 移除全局依赖，WebSocket 不支持常规依赖注入
     }
 ]
 
