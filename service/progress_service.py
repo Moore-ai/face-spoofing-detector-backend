@@ -152,7 +152,7 @@ class ProgressTracker:
                 message=task.message,
             )
 
-        self._notify_progress(task_copy)
+        await self._notify_progress(task_copy)
 
     async def fail_task(self, task_id: str, message: str) -> None:
         """标记任务失败（异步安全）"""
@@ -166,16 +166,16 @@ class ProgressTracker:
             task.end_time = time.time()
         logger.error(f"任务 {task_id} 失败：{message}")
 
-    def _notify_progress(self, task: TaskProgress) -> None:
+    async def _notify_progress(self, task: TaskProgress) -> None:
         """通知进度更新（WebSocket + 回调）"""
         msg = {
             "type": "progress_update",
             "data": task.to_dict(),
         }
 
-        # WebSocket 广播
+        # WebSocket 广播（直接 await，确保消息发送完成）
         try:
-            asyncio.create_task(connection_manager.broadcast_by_task(msg, task.task_id))
+            await connection_manager.broadcast_by_task(msg, task.task_id)
         except Exception as e:
             logger.error(f"WebSocket 广播失败：{e}")
 

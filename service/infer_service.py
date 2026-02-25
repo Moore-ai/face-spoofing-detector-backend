@@ -11,8 +11,10 @@ from inferencer.base_inferencer import (
     FusionBaseInferencer,
     ModelType,
 )
+from inferencer.debug_inferencer import DebugSingleInferencer, DebugFusionInferencer
 from util.result_parser import parse_fusion_prediction, parse_single_prediction
 from schemas.detection import DetectionResultItem
+from util.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -23,33 +25,46 @@ class InferService:
         single_model_path: str,
         fusion_model_path: str,
     ):
-        from util.config import settings
-
         logger.info(f"Loading single model from: {single_model_path}")
         logger.info(f"Loading fusion model from: {fusion_model_path}")
-        try:
-            single_inferencer = FaceAntiSpoofingInferencer.create(
-                model_path=single_model_path,
-                modal_type=ModelType.SINGLE,
-                input_size=settings.INPUT_SIZE,
-                device=settings.DEVICE,
-            )
-            logger.info("Single model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load single model: {e}", exc_info=True)
-            raise
 
-        try:
-            fusion_inferencer = FaceAntiSpoofingInferencer.create(
-                model_path=fusion_model_path,
-                modal_type=ModelType.FUSION,
+        # 检查是否启用调试模式
+        if settings.DEBUG_MODE:
+            logger.info("=== 调试模式已启用 - 使用虚拟推理器 ===")
+            single_inferencer = DebugSingleInferencer(
                 input_size=settings.INPUT_SIZE,
-                device=settings.DEVICE,
+                delay_per_image=settings.DEBUG_DELAY_PER_IMAGE,
             )
-            logger.info("Fusion model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load fusion model: {e}", exc_info=True)
-            raise
+            fusion_inferencer = DebugFusionInferencer(
+                input_size=settings.INPUT_SIZE,
+                delay_per_pair=settings.DEBUG_DELAY_PER_PAIR,
+            )
+            logger.info("Debug inferencers created successfully")
+        else:
+            # 生产模式 - 加载真实模型
+            try:
+                single_inferencer = FaceAntiSpoofingInferencer.create(
+                    model_path=single_model_path,
+                    modal_type=ModelType.SINGLE,
+                    input_size=settings.INPUT_SIZE,
+                    device=settings.DEVICE,
+                )
+                logger.info("Single model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load single model: {e}", exc_info=True)
+                raise
+
+            try:
+                fusion_inferencer = FaceAntiSpoofingInferencer.create(
+                    model_path=fusion_model_path,
+                    modal_type=ModelType.FUSION,
+                    input_size=settings.INPUT_SIZE,
+                    device=settings.DEVICE,
+                )
+                logger.info("Fusion model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load fusion model: {e}", exc_info=True)
+                raise
 
         return InferService(
             _single_model_inferencer=single_inferencer,

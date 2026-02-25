@@ -4,6 +4,8 @@ from typing import Union, overload, Literal
 from inferencer.base_inferencer import BaseInferencer, FusionBaseInferencer, ModelType
 from inferencer.fusion_model_inferencer import FusionModalInferencer
 from inferencer.single_model_inferencer import SingleModalInferencer
+from inferencer.debug_inferencer import DebugSingleInferencer, DebugFusionInferencer
+from util.config import settings
 
 logger = logging.getLogger(__name__)
 
