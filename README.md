@@ -21,7 +21,8 @@
 - **异步任务管理**：后台批量处理，支持任务状态查询
 - **进度追踪服务**：实时统计任务进度、结果数量和分类
 - **灵活配置**：通过环境变量或 `.env` 文件配置所有参数
-- **完整日志**：详细的日志记录，支持文件和控制台双输出
+- **完整日志**：详细的日志记录，仅输出到文件
+- **请求审计**：关键操作审计日志，JSON 格式便于 ELK 采集
 - **全局异常处理**：统一的错误处理和日志记录机制
 - **依赖注入架构**：模块化设计，易于测试和维护
 - **认证与授权**：激活码模式，支持多客户端管理和权限控制
@@ -151,13 +152,23 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 |--------|--------|------|
 | `DEVICE` | `cuda` | 推理设备，`cuda` 或 `cpu` |
 
-### 日志配置
+### 日志配置（新增）
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
 | `LOG_LEVEL` | `INFO` | 日志级别：`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` |
+| `LOG_JSON_FORMAT` | `false` | 是否使用 JSON 格式日志 |
+| `LOG_REQUEST_BODY` | `false` | 是否记录请求体（生产环境建议关闭） |
+| `LOG_RESPONSE_BODY` | `false` | 是否记录响应体（生产环境建议关闭） |
+| `AUDIT_LOG_ENABLED` | `true` | 是否启用审计日志 |
 
-### 认证配置（新增）
+**日志文件位置**：
+- 普通日志：`logs/{timestamp}.log`
+- 审计日志：`logs/{timestamp}_audit.log`（JSON 格式）
+
+**注意**：日志仅输出到文件，不输出到控制台。
+
+### 认证配置
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
@@ -165,7 +176,6 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 | `JWT_EXPIRATION_HOURS` | `24` | JWT Token 过期时间（小时） |
 | `ADMIN_USERNAME` | `admin` | 管理员账户（用于管理后台） |
 | `ADMIN_PASSWORD` | `your-admin-password...` | 管理员密码（生产环境务必修改） |
-| `DEFAULT_API_KEY` | `dev_api_key...` | 默认 API Key（仅开发环境） |
 | `DEFAULT_ACTIVATION_CODE` | `ACT-DEV-DEFAULT-KEY` | 默认激活码（仅开发环境） |
 
 ## 认证系统使用指南
@@ -175,6 +185,20 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 1. 管理员生成激活码 → 2. 用户输入激活码 → 3. 换取 API Key → 4. 后续请求携带 API Key
 ```
+
+### 速率限制策略
+
+| 端点类型 | 限制 | 说明 |
+|----------|------|------|
+| 认证端点（`/auth/*`） | 10 次/分钟 | 防止暴力破解 |
+| 推理端点（`/infer/*`） | 30 次/分钟 | 防止 API 滥用 |
+| 其他端点 | 60 次/分钟 | 默认限制 |
+
+响应头中包含限流信息：
+- `X-RateLimit-Limit`: 总请求数限制
+- `X-RateLimit-Remaining`: 剩余请求数
+- `X-RateLimit-Reset`: 窗口重置时间（秒）
+- `Retry-After`: 重试等待时间（秒）
 
 ### 1. 管理员生成激活码
 
@@ -223,12 +247,14 @@ curl -X POST http://127.0.0.1:8000/auth/activate \
 ```bash
 # 单模态推理
 curl -H "X-API-Key: sk_xxxxx..." \
+  -H "X-Client-ID: your-client-id-from-websocket" \
   -X POST http://127.0.0.1:8000/infer/single \
   -H "Content-Type: application/json" \
   -d '{"mode": "single", "modality": "rgb", "images": [...]}'
 
 # 融合模态推理
 curl -H "X-API-Key: sk_xxxxx..." \
+  -H "X-Client-ID: your-client-id-from-websocket" \
   -X POST http://127.0.0.1:8000/infer/fusion \
   -H "Content-Type: application/json" \
   -d '{"mode": "fusion", "pairs": [{"rgb": "base64_rgb", "ir": "base64_ir"}]}'
@@ -237,6 +263,32 @@ curl -H "X-API-Key: sk_xxxxx..." \
 curl -H "X-API-Key: sk_xxxxx..." \
   http://127.0.0.1:8000/infer/task/{task_id}
 ```
+
+### 审计日志
+
+系统自动记录关键操作的审计日志：
+
+**认证事件**：
+- `auth.activate_code` - 激活码换取 API Key
+- `auth.jwt_login` - JWT 登录
+- `auth.failed` - 认证失败
+
+**管理事件**：
+- `activation_code.created` - 创建激活码
+- `activation_code.deleted` - 删除激活码
+- `activation_code.updated` - 更新激活码
+- `activation_code.deactivated` - 禁用激活码
+
+**推理事件**：
+- `inference.single` - 单模态推理
+- `inference.fusion` - 融合模态推理
+- `inference.task_query` - 任务状态查询
+
+**系统事件**：
+- `system.rate_limited` - 被速率限制
+- `system.error` - 系统错误
+
+审计日志存储在 `logs/{timestamp}_audit.log`，采用 JSON 格式，便于日志分析工具采集。
 
 ## API 接口
 
@@ -438,15 +490,17 @@ python tests/test_websocket_client.py
 
 1. **模型文件**：不要将模型文件提交到 Git，使用 `.gitignore` 忽略 `models/` 目录
 2. **环境变量**：`.env` 文件包含敏感配置，不要提交到版本控制
-3. **日志文件**：日志文件会随时间增长，建议定期清理或使用日志轮转
-4. **GPU 内存**：如果使用 CUDA，确保显存足够加载模型
-5. **并发处理**：服务基于 FastAPI，支持异步并发处理请求
-6. **WebSocket 连接**：检测请求需要先建立 WebSocket 连接获取 `client_id`
-7. **任务持久存储**：任务完成后数据持久保存，可随时查询历史任务
-8. **API Key 安全**：
+3. **日志文件**：日志仅输出到文件（`logs/` 目录），建议定期清理
+4. **审计日志**：JSON 格式存储在 `logs/{timestamp}_audit.log`，便于日志分析
+5. **GPU 内存**：如果使用 CUDA，确保显存足够加载模型
+6. **并发处理**：服务基于 FastAPI，支持异步并发处理请求
+7. **WebSocket 连接**：检测请求需要先建立 WebSocket 连接获取 `client_id`
+8. **任务持久存储**：任务完成后数据持久保存，可随时查询历史任务
+9. **API Key 安全**：
    - 生产环境务必修改默认配置
    - 定期轮换激活码
    - 禁用不再使用的激活码
+10. **速率限制**：触发限流时会自动记录审计日志
 
 ## 许可证
 

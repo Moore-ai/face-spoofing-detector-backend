@@ -10,11 +10,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-# 配置模块级日志（简单配置，确保加载时的日志能被记录）
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# 配置模块级日志（使用 NullHandler，避免在不需要日志时输出到控制台）
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 # 加载.env文件（如果存在）
@@ -62,6 +60,12 @@ class Config:
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
     DEBUG_DELAY_PER_IMAGE: float = float(os.getenv("DEBUG_DELAY_PER_IMAGE", "0.5"))
     DEBUG_DELAY_PER_PAIR: float = float(os.getenv("DEBUG_DELAY_PER_PAIR", "0.8"))
+
+    # 日志配置（新增）
+    LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "false").lower() == "true"
+    LOG_REQUEST_BODY: bool = os.getenv("LOG_REQUEST_BODY", "false").lower() == "true"
+    LOG_RESPONSE_BODY: bool = os.getenv("LOG_RESPONSE_BODY", "false").lower() == "true"
+    AUDIT_LOG_ENABLED: bool = os.getenv("AUDIT_LOG_ENABLED", "true").lower() == "true"
 
 
 # 导出配置实例

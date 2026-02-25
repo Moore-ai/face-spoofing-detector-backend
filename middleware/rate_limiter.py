@@ -8,6 +8,7 @@
 """
 
 import time
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
@@ -18,6 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from util.config import settings
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class RateLimitConfig:
@@ -159,6 +161,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         allowed, remaining, retry_after = rate_limiter.check_rate_limit(request)
 
         if not allowed:
+            # 记录审计日志
+            try:
+                from util.audit import audit_logger_instance
+                api_key = request.headers.get("X-API-Key")
+                api_key_prefix = api_key[:12] + "..." if api_key and len(api_key) > 12 else None
+                client_ip = request.client.host if request.client else "unknown"
+
+                audit_logger_instance.log_rate_limited(
+                    client_ip=client_ip,
+                    path=request.url.path,
+                    api_key_prefix=api_key_prefix,
+                )
+            except Exception as e:
+                # 审计日志失败不影响主流程
+                logger.debug(f"审计日志记录失败：{e}")
+
             # 返回 429 Too Many Requests
             response = Response(
                 content='{"detail": "请求过于频繁，请稍后重试"}',
