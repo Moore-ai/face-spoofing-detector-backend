@@ -11,10 +11,15 @@ class DetectionResultItem(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     mode: str
-    result: str  # "real" 或 "fake"
+    result: str  # "real", "fake", 或 "error"
     confidence: float
     probabilities: np.ndarray
     processing_time: int
+    # 新增字段
+    image_index: Optional[int] = None  # 批次中的索引
+    error: Optional[str] = None  # 错误信息
+    retry_count: int = 0  # 重试次数
+    success: bool = True  # 是否成功
 
     @field_serializer("probabilities")
     def serialize_probabilities(self, value: np.ndarray) -> list[float]:
@@ -33,16 +38,19 @@ class TaskStatusResponse(BaseModel):
     """任务状态查询响应"""
 
     task_id: str
-    status: str  # pending, running, completed, failed
+    status: str  # pending, running, completed, partial_failure, failed
     total_items: int
     completed_items: int
+    failed_items: int = 0  # 失败项数量
     progress_percentage: float
     real_count: int
     fake_count: int
+    error_count: int = 0  # 错误计数
     elapsed_time_ms: int
     message: str
     results: Optional[List[DetectionResultItem]] = None
     current_result: Optional[DetectionResultItem] = None
+    errors: Optional[List[dict]] = None  # 错误详情列表
 
 
 class SingleModeRequest(BaseModel):

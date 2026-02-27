@@ -73,16 +73,25 @@ async def run_single_detection_task(
         )
         logger.info(f"单模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 张图片")
 
+        # 获取任务状态
+        task = await progress_tracker.get_task(task_id)
+
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
         # 发送任务完成通知
         await connection_manager.broadcast_by_task(
             {
-                "type": "task_completed",
+                "type": "task_completed" if task.failed_items == 0 else "task_partial_failure",
                 "data": {
                     "task_id": task_id,
-                    "status": "completed",
-                    "message": "任务已完成，可查询检测结果",
+                    "status": task.status,
+                    "message": task.message,
                     "total_items": len(decoded_images),
                     "processed_items": len(batch_results),
+                    "successful_items": len(batch_results) - task.failed_items,
+                    "failed_items": task.failed_items,
+                    "errors": task.error_items if task.error_items else None,
                 },
             },
             task_id,
@@ -141,16 +150,25 @@ async def run_fusion_detection_task(
 
         logger.info(f"融合模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 对图像")
 
+        # 获取任务状态
+        task = await progress_tracker.get_task(task_id)
+
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
         # 发送任务完成通知
         await connection_manager.broadcast_by_task(
             {
-                "type": "task_completed",
+                "type": "task_completed" if task.failed_items == 0 else "task_partial_failure",
                 "data": {
                     "task_id": task_id,
-                    "status": "completed",
-                    "message": "任务已完成，可查询检测结果",
+                    "status": task.status,
+                    "message": task.message,
                     "total_items": len(decoded_pairs),
                     "processed_items": len(batch_results),
+                    "successful_items": len(batch_results) - task.failed_items,
+                    "failed_items": task.failed_items,
+                    "errors": task.error_items if task.error_items else None,
                 },
             },
             task_id,
@@ -352,11 +370,14 @@ async def get_task_status(
         status=task.status,
         total_items=task.total_items,
         completed_items=task.completed_items,
+        failed_items=task.failed_items,
         progress_percentage=round(task.progress_percentage, 2),
         real_count=task.real_count,
         fake_count=task.fake_count,
+        error_count=task.failed_items,
         elapsed_time_ms=task.elapsed_time_ms,
         message=task.message,
-        results=task.all_results if task.status in ("completed", "failed") else None,
+        results=task.all_results if task.status in ("completed", "partial_failure", "failed") else None,
         current_result=task.current_result,
+        errors=task.error_items if task.error_items else None,
     )

@@ -23,9 +23,11 @@ class TaskProgress:
     task_id: str
     total_items: int
     completed_items: int = 0
-    status: str = ""  # pending, running, completed, failed
+    failed_items: int = 0  # 失败项计数
+    status: str = ""  # pending, running, completed, partial_failure, failed
     current_result: Optional[DetectionResultItem] = None  # 当前检测结果
     all_results: List[DetectionResultItem] = field(default_factory=list)  # 所有检测结果
+    error_items: List[dict] = field(default_factory=list)  # 错误详情
     real_count: int = 0
     fake_count: int = 0
     start_time: Optional[float] = None
@@ -52,7 +54,17 @@ class TaskProgress:
         self.current_result = detection_result
         self.all_results.append(detection_result)
         self.completed_items += 1
-        if detection_result.result == "real":
+
+        if not detection_result.success:
+            self.failed_items += 1
+            self.error_items.append(
+                {
+                    "index": detection_result.image_index,
+                    "error": detection_result.error,
+                    "retry_count": detection_result.retry_count,
+                }
+            )
+        elif detection_result.result == "real":
             self.real_count += 1
         else:
             self.fake_count += 1
@@ -67,17 +79,22 @@ class TaskProgress:
             "task_id": self.task_id,
             "total_items": self.total_items,
             "completed_items": self.completed_items,
+            "failed_items": self.failed_items,
             "progress_percentage": round(self.progress_percentage, 2),
             "status": self.status,
             "current_result": self.current_result.model_dump() if self.current_result else None,
             "real_count": self.real_count,
             "fake_count": self.fake_count,
+            "error_count": self.failed_items,
             "elapsed_time_ms": self.elapsed_time_ms,
             "message": self.message,
         }
 
         if include_all_results:
             result["all_results"] = [r.model_dump() for r in self.all_results]
+
+        if self.error_items:
+            result["errors"] = self.error_items
 
         return result
 
@@ -133,8 +150,13 @@ class ProgressTracker:
             if message:
                 task.message = message
 
+            # 判断任务完成状态
             if task.completed_items == task.total_items:
-                task.status = "completed"
+                if task.failed_items > 0:
+                    task.status = "partial_failure"
+                    task.message = f"任务完成，{task.failed_items} 项失败"
+                else:
+                    task.status = "completed"
                 task.end_time = time.time()
 
             # 在锁内复制任务数据用于通知
@@ -142,9 +164,11 @@ class ProgressTracker:
                 task_id=task.task_id,
                 total_items=task.total_items,
                 completed_items=task.completed_items,
+                failed_items=task.failed_items,
                 status=task.status,
                 current_result=task.current_result,
                 all_results=task.all_results.copy(),
+                error_items=task.error_items.copy(),
                 real_count=task.real_count,
                 fake_count=task.fake_count,
                 start_time=task.start_time,

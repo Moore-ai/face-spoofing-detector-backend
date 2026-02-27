@@ -23,6 +23,7 @@ class DebugSingleInferencer(BaseInferencer):
     - 70% 概率返回 real（真实人脸）
     - 30% 概率返回 fake（攻击人脸）
     - 模拟处理延迟
+    - 可配置失败率用于测试重试机制
     """
 
     def __init__(
@@ -30,6 +31,7 @@ class DebugSingleInferencer(BaseInferencer):
         input_size: int = 112,
         num_classes: int = 2,
         delay_per_image: float = 0.5,
+        failure_rate: float = 0.0,
     ):
         """
         初始化调试推理器
@@ -38,18 +40,20 @@ class DebugSingleInferencer(BaseInferencer):
             input_size: 输入图像尺寸（默认 112）
             num_classes: 分类类别数（默认 2）
             delay_per_image: 每张图像的模拟处理延迟（秒）
+            failure_rate: 模拟失败率（0.0-1.0），用于测试重试机制
         """
         # 不调用父类 __init__，避免加载模型
         self.input_size = input_size
         self.num_classes = num_classes
         self.delay_per_image = delay_per_image
+        self.failure_rate = failure_rate
         self.model_path = "debug_mode"
         self.model_format = None
         self.model = None
 
         logger.info(
             f"DebugSingleInferencer 已初始化 (input_size={input_size}, "
-            f"delay={delay_per_image}s)"
+            f"delay={delay_per_image}s, failure_rate={failure_rate})"
         )
 
     def _load_model(self):
@@ -80,7 +84,14 @@ class DebugSingleInferencer(BaseInferencer):
 
         Returns:
             虚拟的 logits 输出
+
+        Raises:
+            RuntimeError: 模拟推理失败（根据 failure_rate）
         """
+        # 模拟失败（用于测试重试机制）
+        if np.random.random() < self.failure_rate:
+            raise RuntimeError("模拟推理失败 - 用于测试重试机制")
+
         # 70% 概率为 real
         is_real = np.random.random() > 0.3
 
@@ -148,6 +159,7 @@ class DebugFusionInferencer(FusionBaseInferencer):
     - 70% 概率返回 real
     - 30% 概率返回 fake
     - 模拟处理延迟（比单模态稍长）
+    - 可配置失败率用于测试重试机制
     """
 
     def __init__(
@@ -155,6 +167,7 @@ class DebugFusionInferencer(FusionBaseInferencer):
         input_size: int = 112,
         num_classes: int = 2,
         delay_per_pair: float = 0.8,
+        failure_rate: float = 0.0,
     ):
         """
         初始化调试推理器
@@ -163,18 +176,20 @@ class DebugFusionInferencer(FusionBaseInferencer):
             input_size: 输入图像尺寸（默认 112）
             num_classes: 分类类别数（默认 2）
             delay_per_pair: 每对图像的模拟处理延迟（秒）
+            failure_rate: 模拟失败率（0.0-1.0），用于测试重试机制
         """
         # 不调用父类 __init__，避免加载模型
         self.input_size = input_size
         self.num_classes = num_classes
         self.delay_per_pair = delay_per_pair
+        self.failure_rate = failure_rate
         self.model_path = "debug_mode"
         self.model_format = None
         self.model = None
 
         logger.info(
             f"DebugFusionInferencer 已初始化 (input_size={input_size}, "
-            f"delay={delay_per_pair}s)"
+            f"delay={delay_per_pair}s, failure_rate={failure_rate})"
         )
 
     def _load_model(self):
@@ -214,7 +229,14 @@ class DebugFusionInferencer(FusionBaseInferencer):
 
         Returns:
             虚拟的 logits 输出
+
+        Raises:
+            RuntimeError: 模拟推理失败（根据 failure_rate）
         """
+        # 模拟失败（用于测试重试机制）
+        if np.random.random() < self.failure_rate:
+            raise RuntimeError("模拟推理失败 - 用于测试重试机制")
+
         # 70% 概率为 real
         is_real = np.random.random() > 0.3
 

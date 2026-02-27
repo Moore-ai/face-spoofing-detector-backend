@@ -60,12 +60,20 @@ class Config:
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
     DEBUG_DELAY_PER_IMAGE: float = float(os.getenv("DEBUG_DELAY_PER_IMAGE", "0.5"))
     DEBUG_DELAY_PER_PAIR: float = float(os.getenv("DEBUG_DELAY_PER_PAIR", "0.8"))
+    DEBUG_FAILURE_RATE: float = float(os.getenv("DEBUG_FAILURE_RATE", "0.0"))
 
     # 日志配置（新增）
     LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "false").lower() == "true"
     LOG_REQUEST_BODY: bool = os.getenv("LOG_REQUEST_BODY", "false").lower() == "true"
     LOG_RESPONSE_BODY: bool = os.getenv("LOG_RESPONSE_BODY", "false").lower() == "true"
     AUDIT_LOG_ENABLED: bool = os.getenv("AUDIT_LOG_ENABLED", "true").lower() == "true"
+
+    # 重试配置
+    RETRY_ENABLED: bool = os.getenv("RETRY_ENABLED", "true").lower() == "true"
+    RETRY_MAX_ATTEMPTS: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
+    RETRY_DELAY_SECONDS: float = float(os.getenv("RETRY_DELAY_SECONDS", "1.0"))
+    RETRY_EXPONENTIAL_BACKOFF: bool = os.getenv("RETRY_EXPONENTIAL_BACKOFF", "true").lower() == "true"
+    RETRY_MAX_DELAY_SECONDS: float = float(os.getenv("RETRY_MAX_DELAY_SECONDS", "10.0"))
 
 
 # 导出配置实例

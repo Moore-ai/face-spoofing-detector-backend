@@ -27,6 +27,8 @@
 - **依赖注入架构**：模块化设计，易于测试和维护
 - **认证与授权**：激活码模式，支持多客户端管理和权限控制
 - **速率限制**：防止 API 滥用，保护服务稳定性
+- **重试机制**：推理失败自动重试，支持指数退避策略
+- **部分失败支持**：批量任务支持部分失败状态，错误可追踪
 
 ## 技术栈
 
@@ -177,6 +179,25 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 | `ADMIN_USERNAME` | `admin` | 管理员账户（用于管理后台） |
 | `ADMIN_PASSWORD` | `your-admin-password...` | 管理员密码（生产环境务必修改） |
 | `DEFAULT_ACTIVATION_CODE` | `ACT-DEV-DEFAULT-KEY` | 默认激活码（仅开发环境） |
+
+### 调试模式配置
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `DEBUG_MODE` | `false` | 启用调试模式（无需模型文件） |
+| `DEBUG_DELAY_PER_IMAGE` | `0.5` | 单模态每张图像延迟（秒） |
+| `DEBUG_DELAY_PER_PAIR` | `0.8` | 融合模态每对图像延迟（秒） |
+| `DEBUG_FAILURE_RATE` | `0.0` | 模拟失败率（用于测试重试机制） |
+
+### 重试配置
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `RETRY_ENABLED` | `true` | 是否启用推理失败重试 |
+| `RETRY_MAX_ATTEMPTS` | `3` | 最大重试次数（包含首次尝试） |
+| `RETRY_DELAY_SECONDS` | `1.0` | 重试基础延迟（秒） |
+| `RETRY_EXPONENTIAL_BACKOFF` | `true` | 是否启用指数退避 |
+| `RETRY_MAX_DELAY_SECONDS` | `10.0` | 最大重试延迟（秒） |
 
 ## 认证系统使用指南
 
@@ -355,6 +376,7 @@ GET /infer/ws
     "task_id": "task_123456",
     "total_items": 10,
     "completed_items": 3,
+    "failed_items": 0,
     "progress_percentage": 30.0,
     "status": "running",
     "current_result": {
@@ -362,15 +384,74 @@ GET /infer/ws
       "result": "real",
       "confidence": 0.95,
       "probabilities": [0.95, 0.05],
-      "processing_time": 45
+      "processing_time": 45,
+      "success": true,
+      "retry_count": 0
     },
     "real_count": 2,
     "fake_count": 1,
+    "error_count": 0,
     "elapsed_time_ms": 1500,
     "message": "完成第 3/10 张图片的推理"
   }
 }
 ```
+
+### 任务完成通知
+
+任务完成后，服务端推送完成通知：
+
+**全部成功：**
+```json
+{
+  "type": "task_completed",
+  "data": {
+    "task_id": "task_123456",
+    "status": "completed",
+    "message": "任务已完成",
+    "total_items": 10,
+    "successful_items": 10,
+    "failed_items": 0
+  }
+}
+```
+
+**部分失败：**
+```json
+{
+  "type": "task_partial_failure",
+  "data": {
+    "task_id": "task_123456",
+    "status": "partial_failure",
+    "message": "任务完成，2 项失败",
+    "total_items": 10,
+    "successful_items": 8,
+    "failed_items": 2,
+    "errors": [
+      {
+        "index": 3,
+        "error": "模型推理失败：CUDA out of memory",
+        "retry_count": 3
+      },
+      {
+        "index": 7,
+        "error": "图像解码失败：无效的 base64 编码",
+        "retry_count": 3
+      }
+    ]
+  }
+}
+```
+
+### 任务状态说明
+
+| 状态 | 说明 |
+|------|------|
+| `pending` | 任务已创建，等待处理 |
+| `running` | 任务正在处理中 |
+| `completed` | 任务完成，所有项目成功 |
+| `partial_failure` | 任务完成，部分项目失败 |
+| `failed` | 任务失败（任务级别错误） |
 
 ## 项目结构
 
@@ -501,6 +582,15 @@ python tests/test_websocket_client.py
    - 定期轮换激活码
    - 禁用不再使用的激活码
 10. **速率限制**：触发限流时会自动记录审计日志
+11. **重试机制**：
+    - 单张图片推理失败自动重试（默认最多 3 次）
+    - 重试延迟按指数增长（1s, 2s, 4s...）
+    - 部分失败不会导致整个任务失败
+    - 可通过 `DEBUG_FAILURE_RATE` 测试重试逻辑
+12. **任务状态**：
+    - `completed` - 所有项目成功
+    - `partial_failure` - 部分项目失败
+    - `failed` - 任务级别错误（如模型未加载）
 
 ## 许可证
 
