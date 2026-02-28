@@ -11,7 +11,8 @@ from util.websocket_manager import ConnectionManager, connection_manager
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
+    """应用生命周期管理"""
     global _infer_service
     try:
         logger.info("Initializing inference service...")
@@ -26,8 +27,28 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize inference service: {e}", exc_info=True)
         raise
 
+    # 初始化数据库
+    try:
+        logger.info("Initializing database...")
+        from db import db_manager
+
+        db_manager.initialize()
+        db_manager.create_tables()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}", exc_info=True)
+        # 数据库初始化失败不影响服务启动，继续运行
+
     yield
     logger.info("Shutting down")
+
+    # 关闭数据库连接
+    try:
+        from db import db_manager
+        db_manager.close()
+        logger.info("Database connection closed")
+    except Exception as e:
+        logger.error(f"Error closing database connection: {e}")
 
 
 # infer_service

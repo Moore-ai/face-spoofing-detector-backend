@@ -6,6 +6,7 @@ from controller import (
     infer_controller,
     auth_controller,
     activation_controller,
+    history_controller,
 )
 
 import logging
@@ -35,7 +36,13 @@ ROUTER_CONFIGS = [
         "prefix": "/infer",
         "tag": ["模型推理"],
         "dependencies": [],  # 移除全局依赖，WebSocket 不支持常规依赖注入
-    }
+    },
+    {
+        "router": history_controller.router,
+        "prefix": "",
+        "tag": ["历史记录"],
+        "dependencies": [],
+    },
 ]
 
 def register_routers(app: FastAPI):
