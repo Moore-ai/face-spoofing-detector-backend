@@ -2,9 +2,11 @@
 **/__pycache__/
 logs
 .env
+*.db
 
 AGENTS.md
 CLAUDE.md
+QWEN.md
 .claude/**
 AUTH.md
 IMPLEMENTATION_AUTH.md
