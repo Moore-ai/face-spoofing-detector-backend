@@ -199,6 +199,21 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 | `RETRY_EXPONENTIAL_BACKOFF` | `true` | 是否启用指数退避 |
 | `RETRY_MAX_DELAY_SECONDS` | `10.0` | 最大重试延迟（秒） |
 
+### 数据库配置（新增）
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `DATABASE_URL` | `sqlite:///./db/detections.db` | 数据库连接 URL |
+
+**支持的数据库类型**：
+- SQLite（默认）：`sqlite:///./db/detections.db`
+- PostgreSQL：`postgresql://user:password@host:port/dbname`
+
+**注意**：
+- 首次启动时会自动创建数据库表
+- 数据库文件存储在 `db/` 目录
+- 历史记录会在推理完成后自动保存
+
 ## 认证系统使用指南
 
 ### 激活码模式流程
@@ -341,6 +356,32 @@ curl -H "X-API-Key: sk_xxxxx..." \
 | `/infer/task/{task_id}` | GET | 查询任务状态 | **需要 API Key** |
 | `/health` | GET | 健康检查 | 无 |
 
+### 历史记录相关端点（新增）
+
+| 端点 | 方法 | 说明 | 认证要求 |
+|------|------|------|----------|
+| `/history` | GET | 查询历史记录（分页） | **需要 API Key 或 JWT** |
+| `/history/stats` | GET | 获取统计信息 | **需要 API Key 或 JWT** |
+| `/history/task/{task_id}` | GET | 查询单个任务详情 | **需要 API Key 或 JWT** |
+| `/history` | DELETE | 删除历史记录 | **需要 JWT（管理员）** |
+
+**历史记录查询参数**：
+- `client_id` - 按客户端 ID 过滤（可选）
+- `mode` - 按模式过滤：`single` 或 `fusion`（可选）
+- `status` - 按状态过滤：`completed`, `partial_failure`, `failed`（可选，逗号分隔）
+- `days` - 查询最近 N 天的记录（可选）
+- `page` - 页码，从 1 开始（默认 1）
+- `page_size` - 每页数量，最大 100（默认 20）
+
+**统计信息响应**：
+- `total_tasks` - 总任务数
+- `total_inferences` - 总推理次数
+- `total_real` - 真实人脸计数
+- `total_fake` - 伪造人脸计数
+- `total_errors` - 错误计数
+- `success_rate` - 成功率（%）
+- `avg_processing_time_ms` - 平均处理时间（毫秒）
+
 ## 实时进度推送
 
 服务提供 WebSocket 连接，用于实时推送任务进度更新、完成通知和失败通知。
@@ -458,16 +499,18 @@ GET /infer/ws
 ```
 backend/
 ├── main.py                      # 应用入口点，包含全局异常处理
-├── lifespan.py                  # 应用生命周期管理，依赖注入配置
+├── lifespan.py                  # 应用生命周期管理，依赖注入配置（含数据库初始化）
 ├── router.py                    # 路由注册
 ├── controller/                  # FastAPI 控制器（API 端点）
 │   ├── health_controller.py     # 健康检查端点
 │   ├── infer_controller.py      # 推理接口（单模态/融合模态/WebSocket）
 │   ├── auth_controller.py       # 认证路由（JWT Token、API Key）
-│   └── activation_controller.py # 激活码路由
+│   ├── activation_controller.py # 激活码路由
+│   └── history_controller.py    # 历史记录查询/统计/删除 ✅
 ├── service/                     # 业务逻辑层
 │   ├── infer_service.py         # 主推理服务，协调控制器和推理器
-│   └── progress_service.py      # 进度追踪服务
+│   ├── progress_service.py      # 进度追踪服务
+│   └── history_service.py       # 历史记录持久化服务 ✅
 ├── inferencer/                  # 模型推理实现层
 │   ├── base_inferencer.py       # 抽象基类，定义推理接口
 │   ├── inferencer_factory.py    # 工厂类，创建推理器实例
@@ -478,24 +521,30 @@ backend/
 │   ├── logger.py                # 日志配置
 │   ├── result_parser.py         # 模型输出解析器
 │   ├── websocket_manager.py     # WebSocket 连接管理
-│   ├── auth.py                  # 认证工具（API Key、JWT、激活码）
-│   └── model/                   # 模型架构定义
+│   └── auth.py                  # 认证工具（API Key、JWT、激活码）
+├── db/                          # 数据库模块 ✅
+│   ├── __init__.py              # 数据库连接管理
+│   └── models.py                # 数据库模型定义
 ├── schemas/                     # 数据模型（Pydantic）
 │   ├── detection.py             # 检测请求/响应
 │   ├── auth.py                  # 认证相关模型
-│   └── activation.py            # 激活码相关模型
+│   ├── activation.py            # 激活码相关模型
+│   └── history.py               # 历史记录相关模型 ✅
 ├── middleware/                  # 中间件
 │   ├── auth_middleware.py       # 认证中间件
-│   └── rate_limiter.py          # 速率限制中间件
+│   ├── rate_limiter.py          # 速率限制中间件
+│   └── logging_middleware.py    # 请求日志和审计日志中间件
 ├── tests/                       # 测试文件
 │   ├── README.md                # 测试使用指南
 │   ├── test_auth.py             # 认证系统完整测试
 │   ├── test_infer.py            # 推理功能测试
 │   ├── test_activation.py       # 激活码测试
-│   └── test_websocket_client.py # WebSocket 测试
+│   ├── test_websocket_client.py # WebSocket 测试
+│   └── test_history.py          # 历史记录功能测试 ✅
 ├── docs/                        # 文档
 │   └── ADR-001_认证系统架构决策.md
 ├── models/                      # 模型文件存储（.gitignore）
+├── db/                          # SQLite 数据库文件（自动生成） ✅
 ├── logs/                        # 日志文件
 ├── .env                         # 环境变量配置（本地，不提交）
 └── .env.example                 # 环境变量示例
