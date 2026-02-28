@@ -75,6 +75,9 @@ class Config:
     RETRY_EXPONENTIAL_BACKOFF: bool = os.getenv("RETRY_EXPONENTIAL_BACKOFF", "true").lower() == "true"
     RETRY_MAX_DELAY_SECONDS: float = float(os.getenv("RETRY_MAX_DELAY_SECONDS", "10.0"))
 
+    # 数据库配置（新增）
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./db/detections.db")
+
 
 # 导出配置实例
 settings = Config()
