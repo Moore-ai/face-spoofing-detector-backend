@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from db import get_db_session, hash_api_key
+from db import get_db_session
 from service.history_service import DetectionHistoryService
 from schemas.history import (
     HistoryQueryResponse,
@@ -87,9 +87,13 @@ async def query_history(
     try:
         # 如果是普通用户（API Key 认证），只能查询自己的记录
         if auth.auth_type == "api_key":
-            # 从 user_id 生成哈希
-            user_identifier = auth.user_id or "unknown"
-            api_key_hash = hash_api_key(user_identifier)
+            # 从 auth 凭据中提取 API Key 哈希（与保存时保持一致）
+            # auth.user_id 格式为 "api_key:{name}"，我们提取 name 部分作为哈希
+            if auth.user_id and auth.user_id.startswith("api_key:"):
+                api_key_hash = auth.user_id.replace("api_key:", "")[:32]
+            else:
+                api_key_hash = str(auth.user_id or "unknown")[:32]
+
             result = DetectionHistoryService.query_tasks(
                 db=db,
                 api_key_hash=api_key_hash,
@@ -148,8 +152,12 @@ async def get_history_stats(
     try:
         # 如果是普通用户，只能查看自己的统计
         if auth.auth_type == "api_key":
-            user_identifier = auth.user_id or "unknown"
-            api_key_hash = hash_api_key(user_identifier)
+            # 从 auth 凭据中提取 API Key 哈希（与保存时保持一致）
+            if auth.user_id and auth.user_id.startswith("api_key:"):
+                api_key_hash = auth.user_id.replace("api_key:", "")[:32]
+            else:
+                api_key_hash = str(auth.user_id or "unknown")[:32]
+
             result = DetectionHistoryService.get_stats(
                 db=db,
                 api_key_hash=api_key_hash,
@@ -242,8 +250,12 @@ async def get_task_history(
 
         # 权限检查：非管理员只能查看自己的任务
         if auth.auth_type == "api_key":
-            user_identifier = auth.user_id or "unknown"
-            api_key_hash = hash_api_key(user_identifier)
+            # 从 auth 凭据中提取 API Key 哈希（与保存时保持一致）
+            if auth.user_id and auth.user_id.startswith("api_key:"):
+                api_key_hash = auth.user_id.replace("api_key:", "")[:32]
+            else:
+                api_key_hash = str(auth.user_id or "unknown")[:32]
+
             task_api_key_hash = getattr(task, 'api_key_hash', None)
             if task_api_key_hash is not None and task_api_key_hash != api_key_hash:
                 raise HTTPException(status_code=403, detail="无权查看此任务")
