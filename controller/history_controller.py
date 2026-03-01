@@ -128,6 +128,8 @@ async def query_history(
 @router.get("/history/stats", response_model=HistoryStatsResponse, tags=["历史记录"])
 async def get_history_stats(
     client_id: Optional[str] = Query(None, description="客户端 ID 过滤"),
+    mode: Optional[str] = Query(None, description="模式过滤 (single/fusion)"),
+    status: Optional[str] = Query(None, description="状态过滤 (逗号分隔的列表)"),
     days: Optional[int] = Query(None, description="最近 N 天的统计"),
     db: Session = Depends(get_db),
     auth: AuthCredentials = Depends(require_auth),
@@ -136,6 +138,8 @@ async def get_history_stats(
     获取检测历史统计信息
 
     - **client_id**: 按客户端 ID 过滤（可选）
+    - **mode**: 按模式过滤（可选）
+    - **status**: 按状态过滤，逗号分隔（可选）
     - **days**: 统计最近 N 天的数据（可选，不指定则统计所有）
 
     返回总任务数、总推理数、真假人脸计数、成功率、平均处理时间等
@@ -149,6 +153,11 @@ async def get_history_stats(
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days)
 
+    # 解析状态列表
+    status_list = None
+    if status:
+        status_list = [s.strip() for s in status.split(",")]
+
     try:
         # 如果是普通用户，只能查看自己的统计
         if auth.auth_type == "api_key":
@@ -161,6 +170,8 @@ async def get_history_stats(
             result = DetectionHistoryService.get_stats(
                 db=db,
                 api_key_hash=api_key_hash,
+                mode=mode,
+                status=status_list,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -169,6 +180,8 @@ async def get_history_stats(
             result = DetectionHistoryService.get_stats(
                 db=db,
                 client_id=client_id,
+                mode=mode,
+                status=status_list,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -185,7 +198,7 @@ async def delete_history(
     task_ids: Optional[str] = Query(None, description="要删除的任务 ID 列表（逗号分隔）"),
     days_ago: Optional[int] = Query(None, description="删除早于 N 天的记录", ge=1),
     db: Session = Depends(get_db),
-    auth: AuthCredentials = Depends(require_admin),
+    auth: AuthCredentials = Depends(require_auth),
 ):
     """
     删除检测历史记录
@@ -193,7 +206,7 @@ async def delete_history(
     - **task_ids**: 要删除的任务 ID 列表，用逗号分隔（可选）
     - **days_ago**: 删除早于 N 天的记录（可选）
 
-    需要管理员权限（JWT Token 认证）
+    需要 API Key 或 JWT Token 认证。普通用户只能删除自己的记录，管理员可以删除所有记录。
 
     注意：task_ids 和 days_ago 只能使用其中一个
     """
@@ -210,7 +223,22 @@ async def delete_history(
         if task_ids:
             # 删除指定任务
             ids = [tid.strip() for tid in task_ids.split(",")]
-            deleted_count = DetectionHistoryService.delete_tasks(db=db, task_ids=ids)
+
+            # 普通用户只能删除自己的记录，管理员可以删除所有记录
+            if auth.auth_type == "api_key":
+                # 从 auth 凭据中提取 API Key 哈希（与保存时保持一致）
+                api_key_hash = None
+                if auth.user_id and auth.user_id.startswith("api_key:"):
+                    api_key_hash = auth.user_id.replace("api_key:", "")[:32]
+                else:
+                    api_key_hash = str(auth.user_id or "unknown")[:32]
+
+                deleted_count = DetectionHistoryService.delete_tasks(
+                    db=db, task_ids=ids, api_key_hash=api_key_hash
+                )
+            else:
+                # JWT 管理员直接删除
+                deleted_count = DetectionHistoryService.delete_tasks(db=db, task_ids=ids)
         elif days_ago:
             # 删除旧记录
             deleted_count = DetectionHistoryService.delete_tasks(

@@ -227,6 +227,8 @@ class DetectionHistoryService:
         db: Session,
         client_id: Optional[str] = None,
         api_key_hash: Optional[str] = None,
+        mode: Optional[str] = None,
+        status: Optional[List[str]] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> HistoryStatsResponse:
@@ -237,6 +239,8 @@ class DetectionHistoryService:
             db: 数据库会话
             client_id: 客户端 ID 过滤
             api_key_hash: API Key 哈希过滤
+            mode: 模式过滤 ("single" 或 "fusion")
+            status: 状态过滤列表
             start_date: 开始日期
             end_date: 结束日期
 
@@ -249,6 +253,10 @@ class DetectionHistoryService:
             filter_conditions.append(DetectionTask.client_id == client_id)
         if api_key_hash:
             filter_conditions.append(DetectionTask.api_key_hash == api_key_hash)
+        if mode:
+            filter_conditions.append(DetectionTask.mode == mode)
+        if status:
+            filter_conditions.append(DetectionTask.status.in_(status))
         if start_date:
             filter_conditions.append(DetectionTask.created_at >= start_date)
         if end_date:
@@ -272,22 +280,29 @@ class DetectionHistoryService:
         ).filter(*filter_conditions)
         date_range = date_range_query.first()
 
-        # 计算成功率
-        total_tasks = stats.total_tasks or 0 # type: ignore
-        total_successful = stats.total_successful or 0 # type: ignore
-        success_rate = (total_successful / total_tasks * 100) if total_tasks > 0 else 0.0
+        # 计算成功率：成功推理数 / 总推理数 * 100
+        # 成功推理数 = real_count + fake_count（不包括 error）
+        # 总推理数 = real_count + fake_count + error_count
+        total_real = stats.total_real or 0  # type: ignore
+        total_fake = stats.total_fake or 0  # type: ignore
+        total_errors = stats.total_errors or 0  # type: ignore
+
+        total_valid = total_real + total_fake
+        total_all = total_valid + total_errors
+
+        success_rate = (total_all > 0) and (total_valid / total_all * 100) or 0.0
 
         return HistoryStatsResponse(
-            total_tasks=total_tasks,
-            total_inferences=stats.total_inferences or 0, # type: ignore
-            total_real=stats.total_real or 0, # type: ignore
-            total_fake=stats.total_fake or 0, # type: ignore
-            total_errors=stats.total_errors or 0, # type: ignore
+            total_tasks=stats.total_tasks or 0,  # type: ignore
+            total_inferences=stats.total_inferences or 0,  # type: ignore
+            total_real=total_real,
+            total_fake=total_fake,
+            total_errors=total_errors,
             success_rate=round(success_rate, 2),
-            avg_processing_time_ms=round(stats.avg_time or 0, 2), # type: ignore
+            avg_processing_time_ms=round(stats.avg_time or 0, 2),  # type: ignore
             date_range={
-                "start": date_range.start_date.isoformat() if date_range.start_date else None, # type: ignore
-                "end": date_range.end_date.isoformat() if date_range.end_date else None, # type: ignore
+                "start": date_range.start_date.isoformat() if date_range.start_date else None,  # type: ignore
+                "end": date_range.end_date.isoformat() if date_range.end_date else None,  # type: ignore
             },
         )
 
@@ -296,6 +311,7 @@ class DetectionHistoryService:
         db: Session,
         task_ids: Optional[List[str]] = None,
         client_id: Optional[str] = None,
+        api_key_hash: Optional[str] = None,
         older_than_days: Optional[int] = None,
     ) -> int:
         """
@@ -305,6 +321,7 @@ class DetectionHistoryService:
             db: 数据库会话
             task_ids: 要删除的任务 ID 列表
             client_id: 客户端 ID 过滤
+            api_key_hash: API Key 哈希过滤（用于普通用户删除自己的记录）
             older_than_days: 删除早于指定天数的记录
 
         Returns:
@@ -318,6 +335,9 @@ class DetectionHistoryService:
 
             if task_ids:
                 query = query.filter(DetectionTask.task_id.in_(task_ids))
+                # 如果提供了 api_key_hash，额外过滤确保用户只能删除自己的记录
+                if api_key_hash:
+                    query = query.filter(DetectionTask.api_key_hash == api_key_hash)
             elif client_id:
                 query = query.filter(DetectionTask.client_id == client_id)
             elif older_than_days:
