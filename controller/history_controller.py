@@ -49,7 +49,7 @@ def require_admin(
     return auth
 
 
-@router.get("/history", response_model=HistoryQueryResponse, tags=["历史记录"])
+@router.get("/", response_model=HistoryQueryResponse, tags=["历史记录"])
 async def query_history(
     client_id: Optional[str] = Query(None, description="客户端 ID 过滤"),
     mode: Optional[str] = Query(None, description="模式过滤 (single/fusion)"),
@@ -125,7 +125,7 @@ async def query_history(
         raise HTTPException(status_code=500, detail=f"查询失败：{str(e)}")
 
 
-@router.get("/history/stats", response_model=HistoryStatsResponse, tags=["历史记录"])
+@router.get("/stats", response_model=HistoryStatsResponse, tags=["历史记录"])
 async def get_history_stats(
     client_id: Optional[str] = Query(None, description="客户端 ID 过滤"),
     mode: Optional[str] = Query(None, description="模式过滤 (single/fusion)"),
@@ -193,7 +193,7 @@ async def get_history_stats(
         raise HTTPException(status_code=500, detail=f"获取统计失败：{str(e)}")
 
 
-@router.delete("/history", tags=["历史记录"])
+@router.delete("/", tags=["历史记录"])
 async def delete_history(
     task_ids: Optional[str] = Query(None, description="要删除的任务 ID 列表（逗号分隔）"),
     days_ago: Optional[int] = Query(None, description="删除早于 N 天的记录", ge=1),
@@ -257,7 +257,7 @@ async def delete_history(
         raise HTTPException(status_code=500, detail=f"删除失败：{str(e)}")
 
 
-@router.get("/history/task/{task_id}", tags=["历史记录"])
+@router.get("/task/{task_id}", tags=["历史记录"])
 async def get_task_history(
     task_id: str,
     db: Session = Depends(get_db),

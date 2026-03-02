@@ -36,11 +36,11 @@ ROUTER_CONFIGS = [
         "router": infer_controller.router,
         "prefix": "/infer",
         "tag": ["模型推理"],
-        "dependencies": [],  # 移除全局依赖，WebSocket 不支持常规依赖注入
+        "dependencies": [],
     },
     {
         "router": history_controller.router,
-        "prefix": "",
+        "prefix": "/history",
         "tag": ["历史记录"],
         "dependencies": [],
     },

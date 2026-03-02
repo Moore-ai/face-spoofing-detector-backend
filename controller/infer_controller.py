@@ -17,7 +17,7 @@ from fastapi import APIRouter, WebSocket, BackgroundTasks, Header, HTTPException
 from PIL import Image
 from starlette.websockets import WebSocketDisconnect
 
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 
 from lifespan import InferServiceDep, ConnectionManagerDep
 from schemas.detection import (
@@ -29,6 +29,7 @@ from schemas.detection import (
     FusionModeRequest,
 )
 from service.progress_service import progress_tracker, TaskProgress
+from service.image_auto_save_service import image_auto_save_service
 from util.auth import AuthCredentials
 from middleware.auth_middleware import get_current_user
 from db import db_manager
@@ -106,6 +107,15 @@ async def run_single_detection_task(
             api_key_hash=api_key_hash,
             task=task,
             mode="single",
+        )
+
+        # 自动保存图片（根据策略）
+        await save_images_auto(
+            task_id=task_id,
+            client_id=client_id,
+            api_key_hash=api_key_hash,
+            images=images,
+            task=task,
         )
 
     except Exception as e:
@@ -196,6 +206,15 @@ async def run_fusion_detection_task(
             mode="fusion",
         )
 
+        # 自动保存图片（根据策略）
+        await save_images_auto(
+            task_id=task_id,
+            client_id=client_id,
+            api_key_hash=api_key_hash,
+            images=[pair.rgb for pair in pairs],  # 只保存 RGB 图片
+            task=task,
+        )
+
     except Exception as e:
         await progress_tracker.fail_task(task_id, str(e))
         logger.error(f"融合模态检测任务 {task_id} 失败：{e}", exc_info=True)
@@ -269,6 +288,43 @@ async def save_task_history(
             db.close()
     except Exception as e:
         logger.error(f"保存任务历史记录失败 {task_id}: {e}", exc_info=True)
+        # 不抛出异常，避免影响主流程
+
+
+async def save_images_auto(
+    task_id: str,
+    client_id: Optional[str],
+    api_key_hash: Optional[str],
+    images: List[str],
+    task: TaskProgress,
+) -> None:
+    """自动保存图片（根据策略）"""
+    try:
+        # 准备结果数据
+        results = []
+        for result in task.all_results:
+            results.append({
+                "mode": result.mode,
+                "modality": getattr(result, "modality", "rgb"),
+                "result": result.result,
+                "confidence": result.confidence,
+                "image_index": result.image_index,
+                "error": result.error,
+                "retry_count": result.retry_count,
+                "success": result.success,
+                "processing_time": result.processing_time,
+            })
+
+        # 调用自动存储服务
+        await image_auto_save_service.save_images_from_results(
+            task_id=task_id,
+            client_id=client_id,
+            api_key_hash=api_key_hash,
+            results=results,
+            original_images=images,
+        )
+    except Exception as e:
+        logger.error(f"自动保存图片失败 {task_id}: {e}", exc_info=True)
         # 不抛出异常，避免影响主流程
 
 
