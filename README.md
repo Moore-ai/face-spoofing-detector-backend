@@ -29,6 +29,8 @@
 - **速率限制**：防止 API 滥用，保护服务稳定性
 - **重试机制**：推理失败自动重试，支持指数退避策略
 - **部分失败支持**：批量任务支持部分失败状态，错误可追踪
+- **图片存储管理**：支持本地/S3 存储，提供图片上传、查询、删除、统计 API
+- **存储配额管理**：防止存储溢出，支持手动清理过期图片
 
 ## 技术栈
 
@@ -214,6 +216,42 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 - 数据库文件存储在 `db/` 目录
 - 历史记录会在推理完成后自动保存
 
+### 图片存储配置（新增）
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `STORAGE_TYPE` | `local` | 存储类型：`local`（本地）或 `s3`（对象存储） |
+| `STORAGE_LOCAL_PATH` | `storage/images` | 本地存储基础路径 |
+| `STORAGE_QUOTA_BYTES` | `` | 存储配额（字节），空表示无限制 |
+| `STORAGE_RETENTION_DAYS` | `30` | 图片保留天数（清理时使用） |
+| `STORAGE_AUTO_SAVE` | `true` | 是否自动保存图片（推理完成后） |
+| `STORAGE_SAVE_STRATEGY` | `error_only` | 存储策略：`never`/`always`/`error_only`/`smart` |
+| `STORAGE_SAVE_ERROR_RATE` | `1.0` | 错误结果保存率（智能策略） |
+| `STORAGE_SAVE_FAKE_RATE` | `0.1` | 伪造样本保存率（智能策略） |
+| `STORAGE_SAVE_REAL_RATE` | `0.01` | 真实样本保存率（智能策略） |
+| `STORAGE_SAVE_LOW_CONFIDENCE_THRESHOLD` | `0.6` | 低置信度阈值（智能策略） |
+| `STORAGE_MAX_PER_TASK` | `10` | 每任务最大保存数 |
+| `IMAGE_COMPRESS_ENABLED` | `true` | 是否启用图片压缩 |
+| `IMAGE_COMPRESS_QUALITY` | `75` | 压缩质量（1-100） |
+| `IMAGE_COMPRESS_TYPE` | `opencv` | 压缩器类型：`opencv`/`pillow`/`resize` |
+| `IMAGE_COMPRESS_MAX_WIDTH` | `` | 最大宽度（resize 压缩器） |
+| `IMAGE_COMPRESS_MAX_HEIGHT` | `` | 最大高度（resize 压缩器） |
+
+**S3 对象存储配置**（可选，使用本地存储时无需配置）：
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `S3_BUCKET` | `` | S3 桶名 |
+| `S3_REGION` | `us-east-1` | AWS 区域 |
+| `S3_ENDPOINT_URL` | `` | S3 兼容端点（用于 MinIO、阿里云 OSS 等） |
+| `S3_ACCESS_KEY` | `` | S3 访问密钥 |
+| `S3_SECRET_KEY` | `` | S3 密钥 |
+
+**注意**：
+- 本地存储采用两级目录结构：`storage/images/{prefix1}/{prefix2}/{image_id}.bin`
+- 存储配额用于防止存储溢出
+- 清理过期图片需要手动调用 API 端点
+
 ## 认证系统使用指南
 
 ### 激活码模式流程
@@ -382,6 +420,91 @@ curl -H "X-API-Key: sk_xxxxx..." \
 - `success_rate` - 成功率（%）
 - `avg_processing_time_ms` - 平均处理时间（毫秒）
 
+### 智能图片存储管理（新增）- 方案 A：服务端控制策略
+
+**架构说明**：
+- **服务端自动存储**：推理完成后根据策略自动保存有意义的图片
+- **客户端无上传权限**：不提供图片上传端点，存储由服务端控制
+- **智能存储策略**：默认只存储错误/失败结果，支持智能采样
+- **图片压缩**：支持多种压缩算法，减少存储空间
+
+**存储策略类型**：
+| 策略类型 | 说明 | 适用场景 |
+|----------|------|----------|
+| `never` | 从不存储 | 完全不保存图片 |
+| `always` | 总是存储 | 测试环境，不推荐生产使用 |
+| `error_only` | **只存储错误/失败结果** | **生产环境推荐** |
+| `smart` | 智能采样 | 模型优化阶段 |
+
+| 端点 | 方法 | 说明 | 认证要求 |
+|------|------|------|----------|
+| `/storage/images` | GET | 查询图片列表 | **需要 JWT（管理员）** |
+| `/storage/images/{image_id}` | GET | 获取单个图片信息 | **需要 JWT（管理员）** |
+| `/storage/images` | DELETE | 删除图片 | **需要 JWT（管理员）** |
+| `/storage/stats` | GET | 获取存储统计 | **需要 JWT（管理员）** |
+| `/storage/config` | GET | 获取存储配置 | **需要 JWT（管理员）** |
+| `/storage/config` | PUT | 更新存储配置 | **需要 JWT（管理员）** |
+| `/storage/cleanup` | POST | 清理过期图片 | **需要 JWT（管理员）** |
+| `/storage/image-ids` | GET | 获取所有图片 ID 列表 | **需要 JWT（管理员）** |
+| `/storage/images/download` | POST | 批量下载图片（ZIP） | **需要 JWT（管理员）** |
+
+**注意**：所有存储相关端点**仅限管理员**（JWT Token）访问，客户端无法上传图片。
+
+**查询参数**：
+- `task_id` - 按任务 ID 过滤（可选）
+- `start_date` - 查询开始日期（可选）
+- `end_date` - 查询结束日期（可选）
+- `page` - 页码，从 1 开始（默认 1）
+- `page_size` - 每页数量，最大 100（默认 20）
+
+**存储统计响应**：
+- `total_images` - 总图片数
+- `total_size_bytes` - 总存储空间（字节）
+- `total_size_mb` - 总存储空间（MB）
+- `quota_bytes` - 存储配额（字节）
+- `quota_used_percent` - 配额使用百分比
+- `by_type` - 按类型统计（original/processed）
+- `by_modality` - 按模态统计（rgb/ir/fusion）
+
+**新增端点说明**：
+
+1. **GET `/storage/image-ids`** - 获取所有图片 ID 列表
+   - 返回所有已存储图片的 ID 列表
+   - 用于批量下载或其他批量操作
+   - 响应格式：
+     ```json
+     {
+       "total": 150,
+       "image_ids": ["uuid-1", "uuid-2", ...]
+     }
+     ```
+
+2. **POST `/storage/images/download`** - 批量下载图片
+   - 请求参数：
+     ```json
+     {
+       "image_ids": ["uuid-1", "uuid-2", "uuid-3"]
+     }
+     ```
+   - 限制：最多同时下载 100 张图片
+   - 返回：ZIP 压缩包（`application/zip`），包含所有请求的图片文件
+   - 自动跳过不存在的图片
+   - 根据图片类型使用正确的文件扩展名（.jpg, .png, .gif, .webp）
+
+**配置示例**：
+```bash
+# 启用自动存储（推理完成后自动保存）
+STORAGE_AUTO_SAVE=true
+
+# 设置存储策略（推荐：error_only）
+STORAGE_SAVE_STRATEGY=error_only
+
+# 启用图片压缩
+IMAGE_COMPRESS_ENABLED=true
+IMAGE_COMPRESS_QUALITY=75
+IMAGE_COMPRESS_TYPE=opencv
+```
+
 ## 实时进度推送
 
 服务提供 WebSocket 连接，用于实时推送任务进度更新、完成通知和失败通知。
@@ -506,11 +629,13 @@ backend/
 │   ├── infer_controller.py      # 推理接口（单模态/融合模态/WebSocket）
 │   ├── auth_controller.py       # 认证路由（JWT Token、API Key）
 │   ├── activation_controller.py # 激活码路由
-│   └── history_controller.py    # 历史记录查询/统计/删除 ✅
+│   ├── history_controller.py    # 历史记录查询/统计/删除 ✅
+│   └── storage_controller.py    # 图片存储管理 ✅
 ├── service/                     # 业务逻辑层
 │   ├── infer_service.py         # 主推理服务，协调控制器和推理器
 │   ├── progress_service.py      # 进度追踪服务
-│   └── history_service.py       # 历史记录持久化服务 ✅
+│   ├── history_service.py       # 历史记录持久化服务 ✅
+│   └── image_auto_save_service.py # 图片自动存储服务 ✅
 ├── inferencer/                  # 模型推理实现层
 │   ├── base_inferencer.py       # 抽象基类，定义推理接口
 │   ├── inferencer_factory.py    # 工厂类，创建推理器实例
@@ -521,15 +646,19 @@ backend/
 │   ├── logger.py                # 日志配置
 │   ├── result_parser.py         # 模型输出解析器
 │   ├── websocket_manager.py     # WebSocket 连接管理
-│   └── auth.py                  # 认证工具（API Key、JWT、激活码）
+│   ├── auth.py                  # 认证工具（API Key、JWT、激活码）
+│   ├── image_compressor.py      # 图片压缩模块（OpenCV/Pillow/Resize）✅
+│   ├── image_storage_policy.py  # 图片存储策略模块 ✅
+│   └── storage.py               # 图片存储管理（本地/S3）✅
 ├── db/                          # 数据库模块 ✅
 │   ├── __init__.py              # 数据库连接管理
-│   └── models.py                # 数据库模型定义
+│   └── models.py                # 数据库模型定义（DetectionTask, DetectionResult, StoredImage）
 ├── schemas/                     # 数据模型（Pydantic）
 │   ├── detection.py             # 检测请求/响应
 │   ├── auth.py                  # 认证相关模型
 │   ├── activation.py            # 激活码相关模型
-│   └── history.py               # 历史记录相关模型 ✅
+│   ├── history.py               # 历史记录相关模型 ✅
+│   └── storage.py               # 图片存储相关模型 ✅
 ├── middleware/                  # 中间件
 │   ├── auth_middleware.py       # 认证中间件
 │   ├── rate_limiter.py          # 速率限制中间件
@@ -540,11 +669,11 @@ backend/
 │   ├── test_infer.py            # 推理功能测试
 │   ├── test_activation.py       # 激活码测试
 │   ├── test_websocket_client.py # WebSocket 测试
-│   └── test_history.py          # 历史记录功能测试 ✅
-├── docs/                        # 文档
-│   └── ADR-001_认证系统架构决策.md
+│   ├── test_history.py          # 历史记录功能测试 ✅
+│   └── test_storage.py          # 图片存储功能测试 ✅
 ├── models/                      # 模型文件存储（.gitignore）
 ├── db/                          # SQLite 数据库文件（自动生成） ✅
+├── storage/                     # 图片存储目录（自动生成） ✅
 ├── logs/                        # 日志文件
 ├── .env                         # 环境变量配置（本地，不提交）
 └── .env.example                 # 环境变量示例
@@ -608,12 +737,31 @@ python tests/test_activation.py
 
 # WebSocket 客户端测试
 python tests/test_websocket_client.py
+
+# 历史记录功能测试（无需服务运行）
+python tests/test_history.py
+
+# 图片存储功能测试（无需服务运行）
+python tests/test_storage.py
 ```
 
 **测试说明**：
 - `tests/test_auth.py` - 认证系统完整测试（JWT、激活码、API Key、WebSocket 连接）
 - `tests/test_infer.py` - 推理功能测试（单模态、融合模态、任务查询、进度推送）
 - `tests/test_activation.py` - 激活码单元测试（离线测试）
+- `tests/test_websocket_client.py` - WebSocket 客户端测试
+- `tests/test_history.py` - 历史记录功能测试（数据库 CRUD、查询、统计）
+- `tests/test_storage.py` - 图片存储功能测试（上传、查询、删除、统计、清理、批量下载、图片压缩、存储配额）
+  - 测试 1: 存储初始化
+  - 测试 2: 上传图片
+  - 测试 3: 查询图片
+  - 测试 4: 存储统计
+  - 测试 5: 删除图片
+  - 测试 6: 清理过期图片
+  - 测试 7: 获取所有图片 ID 列表
+  - 测试 8: 图片压缩功能测试（OpenCV/Pillow）
+  - 测试 9: 存储配额测试
+  - 测试 10: API 端点测试（需要服务运行）
 - `tests/README.md` - 测试使用指南
 
 ## 注意事项
@@ -640,6 +788,11 @@ python tests/test_websocket_client.py
     - `completed` - 所有项目成功
     - `partial_failure` - 部分项目失败
     - `failed` - 任务级别错误（如模型未加载）
+13. **图片存储**：
+    - 本地存储采用两级目录结构，避免单目录文件过多
+    - 存储配额用于防止存储溢出，建议根据磁盘空间合理设置
+    - 清理过期图片需手动调用 `POST /storage/cleanup` 端点
+    - S3 存储需要安装 `boto3` 库：`pip install boto3`
 
 ## 许可证
 
