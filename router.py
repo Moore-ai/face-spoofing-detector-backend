@@ -7,6 +7,7 @@ from controller import (
     auth_controller,
     activation_controller,
     history_controller,
+    storage_controller,
 )
 
 import logging
@@ -41,6 +42,12 @@ ROUTER_CONFIGS = [
         "router": history_controller.router,
         "prefix": "",
         "tag": ["历史记录"],
+        "dependencies": [],
+    },
+    {
+        "router": storage_controller.router,
+        "prefix": "/storage",
+        "tag": ["图片存储"],
         "dependencies": [],
     },
 ]

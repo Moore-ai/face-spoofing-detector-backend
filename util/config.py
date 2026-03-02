@@ -6,6 +6,7 @@
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -77,6 +78,35 @@ class Config:
 
     # 数据库配置（新增）
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./db/detections.db")
+
+    # 图片存储配置
+    STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "local")  # "local" 或 "s3"
+    STORAGE_LOCAL_PATH: str = os.getenv("STORAGE_LOCAL_PATH", "storage/images")
+    STORAGE_QUOTA_BYTES: Optional[int] = None
+    STORAGE_RETENTION_DAYS: int = int(os.getenv("STORAGE_RETENTION_DAYS", "30"))
+
+    # S3 存储配置（可选）
+    S3_BUCKET: str = os.getenv("S3_BUCKET", "")
+    S3_REGION: str = os.getenv("S3_REGION", "us-east-1")
+    S3_ENDPOINT_URL: Optional[str] = os.getenv("S3_ENDPOINT_URL")
+    S3_ACCESS_KEY: Optional[str] = os.getenv("S3_ACCESS_KEY")
+    S3_SECRET_KEY: Optional[str] = os.getenv("S3_SECRET_KEY")
+
+    # 图片自动保存配置（方案 A：服务端控制策略）
+    STORAGE_AUTO_SAVE: bool = os.getenv("STORAGE_AUTO_SAVE", "true").lower() == "true"
+    STORAGE_SAVE_STRATEGY: str = os.getenv("STORAGE_SAVE_STRATEGY", "error_only")  # never, always, error_only, smart
+    STORAGE_SAVE_ERROR_RATE: float = float(os.getenv("STORAGE_SAVE_ERROR_RATE", "1.0"))
+    STORAGE_SAVE_FAKE_RATE: float = float(os.getenv("STORAGE_SAVE_FAKE_RATE", "0.1"))
+    STORAGE_SAVE_REAL_RATE: float = float(os.getenv("STORAGE_SAVE_REAL_RATE", "0.01"))
+    STORAGE_SAVE_LOW_CONFIDENCE_THRESHOLD: float = float(os.getenv("STORAGE_SAVE_LOW_CONFIDENCE_THRESHOLD", "0.6"))
+    STORAGE_MAX_PER_TASK: int = int(os.getenv("STORAGE_MAX_PER_TASK", "10"))
+
+    # 图片压缩配置
+    IMAGE_COMPRESS_ENABLED: bool = os.getenv("IMAGE_COMPRESS_ENABLED", "true").lower() == "true"
+    IMAGE_COMPRESS_QUALITY: int = int(os.getenv("IMAGE_COMPRESS_QUALITY", "75"))
+    IMAGE_COMPRESS_TYPE: str = os.getenv("IMAGE_COMPRESS_TYPE", "opencv")  # opencv, pillow, resize
+    IMAGE_COMPRESS_MAX_WIDTH: Optional[int] = int(os.getenv("IMAGE_COMPRESS_MAX_WIDTH") or 0) or None
+    IMAGE_COMPRESS_MAX_HEIGHT: Optional[int] = int(os.getenv("IMAGE_COMPRESS_MAX_HEIGHT") or 0) or None
 
 
 # 导出配置实例

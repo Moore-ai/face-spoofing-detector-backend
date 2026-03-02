@@ -3,7 +3,7 @@
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Boolean, BigInteger
 from sqlalchemy.orm import relationship
 from db import Base
 
@@ -78,3 +78,38 @@ class DetectionResult(Base):
 
     def __repr__(self):
         return f"<DetectionResult(task_id='{self.task_id}', index={self.image_index}, result='{self.result}')>"
+
+
+class StoredImage(Base):
+    """存储图片表"""
+
+    __tablename__ = "stored_images"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    image_id = Column(String(64), unique=True, index=True, nullable=False)
+    task_id = Column(String(64), index=True, nullable=False)  # 关联的任务 ID
+    client_id = Column(String(64), index=True, nullable=True)  # 客户端 ID（冗余字段，便于查询）
+    api_key_hash = Column(String(64), index=True, nullable=True)  # API Key 哈希（冗余字段）
+
+    # 图片信息
+    image_type = Column(String(32), nullable=False)  # "original" 或 "processed"
+    modality = Column(String(16), nullable=False)  # "rgb", "ir", "fusion"
+    storage_type = Column(String(16), nullable=False, default="local")  # "local" 或 "s3"
+    storage_path = Column(String(512), nullable=False)  # 存储路径或 URL
+    relative_path = Column(String(512), nullable=True)  # 相对路径（本地存储）
+
+    # 文件信息
+    file_size = Column(BigInteger, nullable=False)  # 文件大小（字节）
+    content_type = Column(String(128), nullable=False, default="image/jpeg")
+    width = Column(Integer, nullable=True)  # 图片宽度（可选）
+    height = Column(Integer, nullable=True)  # 图片高度（可选）
+
+    # 元数据（JSON 格式）
+    metadata_json = Column(Text, nullable=True)  # 额外元数据
+
+    # 时间戳
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    uploaded_by = Column(String(64), nullable=True)  # 上传者（可选）
+
+    def __repr__(self):
+        return f"<StoredImage(image_id='{self.image_id}', task_id='{self.task_id}', type='{self.image_type}')>"

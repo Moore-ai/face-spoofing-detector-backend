@@ -3,6 +3,7 @@
 logs
 .env
 *.db
+storage
 
 AGENTS.md
 CLAUDE.md
