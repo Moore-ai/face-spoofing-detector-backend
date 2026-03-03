@@ -38,6 +38,7 @@ class ActivationCodeInfo(BaseModel):
     current_uses: int = Field(default=0, description="当前使用次数")
     expires_at: Optional[datetime] = Field(None, description="过期时间")
     permissions: list[str] = Field(default_factory=list, description="权限列表")
+    priority: int = Field(default=0, ge=0, le=100, description="任务优先级，范围 0-100，值越大优先级越高")
 
 
 class ActivationCodeCreate(BaseModel):
@@ -47,6 +48,7 @@ class ActivationCodeCreate(BaseModel):
     max_uses: int = Field(..., ge=1, description="最大使用次数（必须 >= 1）")
     expires_in_hours: Optional[int] = Field(None, description="过期时间（小时）")
     permissions: list[str] = Field(default=["read", "write"], description="权限列表")
+    priority: int = Field(default=0, ge=0, le=100, description="任务优先级，范围 0-100，值越大优先级越高")
 
 
 class ActivationCodeListResponse(BaseModel):
@@ -68,6 +70,7 @@ class ActivationCodeGenerateResponse(BaseModel):
     is_active: bool = Field(default=True, description="是否启用")
     max_uses: int = Field(..., description="最大使用次数")
     expires_at: Optional[datetime] = Field(None, description="过期时间")
+    priority: int = Field(default=0, description="任务优先级")
 
 
 class ActivationCodeUpdate(BaseModel):
@@ -76,3 +79,4 @@ class ActivationCodeUpdate(BaseModel):
     is_active: Optional[bool] = Field(None, description="是否启用")
     max_uses: Optional[int] = Field(None, ge=1, description="最大使用次数")
     permissions: Optional[list[str]] = Field(None, description="权限列表")
+    priority: Optional[int] = Field(None, ge=0, le=100, description="任务优先级")

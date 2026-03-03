@@ -9,8 +9,6 @@ AGENTS.md
 CLAUDE.md
 QWEN.md
 .claude/**
-AUTH.md
-IMPLEMENTATION_AUTH.md
 REQUIREMENTS.md
 memory/**
 docs/**

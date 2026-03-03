@@ -67,6 +67,7 @@ def register_api_key(
     name: str,
     permissions: list[str] | None = None,
     user_id: str = "",
+    priority: int = 0,  # 任务优先级，0=普通，1=VIP
 ) -> APIKeyInfo:
     """注册新的 API Key"""
     if permissions is None:
@@ -77,6 +78,7 @@ def register_api_key(
         created_at=datetime.utcnow(),
         permissions=permissions,
         user_id=user_id,
+        priority=priority,
     )
     API_KEYS_DB[api_key] = info.model_dump()
     return info
@@ -135,11 +137,13 @@ class AuthCredentials:
         user_id: str | None = None,
         permissions: list[str] | None = None,
         auth_type: str | None = None,  # "api_key" or "jwt"
+        priority: int = 0,  # 任务优先级
     ):
         self.authenticated = authenticated
         self.user_id = user_id
         self.permissions = permissions or []
         self.auth_type = auth_type
+        self.priority = priority  # 优先级：0=普通，1=VIP
 
     @classmethod
     def from_api_key(cls, api_key: str) -> "AuthCredentials":
@@ -151,6 +155,7 @@ class AuthCredentials:
                 user_id=f"api_key:{key_info.name}",
                 permissions=key_info.permissions,
                 auth_type="api_key",
+                priority=key_info.priority,
             )
         return cls()
 
@@ -164,6 +169,7 @@ class AuthCredentials:
                 user_id=payload.sub,
                 permissions=payload.permissions,
                 auth_type="jwt",
+                priority=0,  # JWT Token 默认为普通优先级
             )
         return cls()
 
@@ -208,6 +214,7 @@ def create_activation_code(
     max_uses: int = 1,  # 默认 1 次使用
     expires_in_hours: int | None = None,
     permissions: list[str] | None = None,
+    priority: int = 0,  # 任务优先级，0=普通，1=VIP
 ) -> ActivationCodeInfo:
     """创建新的激活码
 
@@ -216,6 +223,7 @@ def create_activation_code(
         max_uses: 最大使用次数（必须 >= 1，默认 1 次）
         expires_in_hours: 过期时间（小时），None 表示永不过期
         permissions: 权限列表，默认 ["read", "write"]
+        priority: 任务优先级，0=普通，1=VIP
 
     Returns:
         ActivationCodeInfo: 激活码信息
@@ -244,6 +252,7 @@ def create_activation_code(
         current_uses=0,
         expires_at=expires_at,
         permissions=permissions,
+        priority=priority,
     )
 
     ACTIVATION_CODES_DB[code] = info.model_dump()
@@ -302,12 +311,13 @@ def activate_with_code(code: str) -> tuple[str, ActivationCodeInfo] | None:
     # 生成 API Key
     api_key = generate_api_key()
 
-    # 注册 API Key，关联到激活码的用户
+    # 注册 API Key，关联到激活码的用户和优先级
     register_api_key(
         api_key=api_key,
         name=f"activated_{code}",
         permissions=code_info.permissions,
         user_id=code_info.user_id,
+        priority=code_info.priority,  # 使用激活码的优先级
     )
 
     # 增加使用次数
@@ -349,6 +359,7 @@ def update_activation_code(
     is_active: bool | None = None,
     max_uses: int | None = None,
     permissions: list[str] | None = None,
+    priority: int | None = None,
 ) -> ActivationCodeInfo | None:
     """更新激活码配置"""
     if code not in ACTIVATION_CODES_DB:
@@ -360,5 +371,7 @@ def update_activation_code(
         ACTIVATION_CODES_DB[code]["max_uses"] = max_uses
     if permissions is not None:
         ACTIVATION_CODES_DB[code]["permissions"] = permissions
+    if priority is not None:
+        ACTIVATION_CODES_DB[code]["priority"] = priority
 
     return ActivationCodeInfo(**ACTIVATION_CODES_DB[code])

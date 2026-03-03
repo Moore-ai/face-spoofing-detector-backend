@@ -22,9 +22,13 @@ class TaskProgress:
 
     task_id: str
     total_items: int
+    client_id: str = ""  # 关联的客户端 ID
+    priority: int = 0  # 任务优先级，0-100，值越大优先级越高
     completed_items: int = 0
     failed_items: int = 0  # 失败项计数
-    status: str = ""  # pending, running, completed, partial_failure, failed
+    status: str = ""  # pending, running, completed, partial_failure, failed, cancelled
+    is_cancelling: bool = False  # 取消请求标志
+    cancelled_at: Optional[float] = None  # 取消时间
     current_result: Optional[DetectionResultItem] = None  # 当前检测结果
     all_results: List[DetectionResultItem] = field(default_factory=list)  # 所有检测结果
     error_items: List[dict] = field(default_factory=list)  # 错误详情
@@ -88,6 +92,7 @@ class TaskProgress:
             "error_count": self.failed_items,
             "elapsed_time_ms": self.elapsed_time_ms,
             "message": self.message,
+            "priority": self.priority,  # 新增：任务优先级
         }
 
         if include_all_results:
@@ -108,17 +113,33 @@ class ProgressTracker:
         # 异步锁保护共享数据
         self._lock = asyncio.Lock()
 
-    async def create_task(self, total_items: int) -> str:
-        """创建新任务（异步安全）"""
+    async def create_task(
+        self,
+        total_items: int,
+        client_id: Optional[str] = None,
+        priority: int = 0,
+    ) -> str:
+        """创建新任务（异步安全）
+
+        Args:
+            total_items: 任务总项数
+            client_id: 客户端 ID（可选）
+            priority: 任务优先级
+
+        Returns:
+            任务 ID
+        """
         async with self._lock:
             task_id = str(uuid.uuid4())
             task = TaskProgress(
                 task_id=task_id,
                 total_items=total_items,
+                client_id=client_id or "",
+                priority=priority,
                 status="pending",
             )
             self.progresses[task_id] = task
-        logger.info(f"创建任务 {task_id}, 总计 {total_items} 项")
+        logger.info(f"创建任务 {task_id}, 总计 {total_items} 项，客户端 ID: {client_id}, 优先级：{priority}")
         return task_id
 
     async def get_task(self, task_id: str) -> Optional[TaskProgress]:
@@ -209,6 +230,72 @@ class ProgressTracker:
             if task_id in self.progresses:
                 del self.progresses[task_id]
         logger.debug(f"清理任务 {task_id}")
+
+    async def cancel_task(self, task_id: str, message: str = "用户取消") -> bool:
+        """取消任务（异步安全）
+
+        Args:
+            task_id: 任务 ID
+            message: 取消原因
+
+        Returns:
+            bool: 是否成功取消
+        """
+        async with self._lock:
+            if task_id not in self.progresses:
+                return False
+
+            task = self.progresses[task_id]
+
+            # 已完成或已取消的任务无法取消
+            if task.status in ("completed", "partial_failure", "failed", "cancelled"):
+                logger.warning(f"任务 {task_id} 状态为 {task.status}，无法取消")
+                return False
+
+            # 设置取消标志
+            task.is_cancelling = True
+            task.message = message
+            logger.info(f"任务 {task_id} 取消请求已设置")
+            return True
+
+    async def check_cancellation(self, task_id: str) -> bool:
+        """检查任务是否被取消（异步安全）"""
+        async with self._lock:
+            if task_id not in self.progresses:
+                return True  # 任务不存在，视为取消
+            return self.progresses[task_id].is_cancelling
+
+    async def get_client_tasks(self, client_id: str) -> List[TaskProgress]:
+        """获取指定客户端的所有任务（异步安全）
+
+        Args:
+            client_id: 客户端 ID
+
+        Returns:
+            该客户端的所有任务列表，按优先级和开始时间排序（高优先级在前）
+        """
+        async with self._lock:
+            tasks = []
+            for task in self.progresses.values():
+                if task.client_id == client_id:
+                    tasks.append(task)
+            # 按优先级和开始时间排序（高优先级在前，同优先级最新的在前）
+            return sorted(tasks, key=lambda t: (-t.priority, t.start_time or 0), reverse=True)
+
+    async def confirm_cancel(self, task_id: str) -> None:
+        """确认任务已取消（异步安全）
+
+        Args:
+            task_id: 任务 ID
+        """
+        async with self._lock:
+            if task_id in self.progresses:
+                task = self.progresses[task_id]
+                task.status = "cancelled"
+                task.cancelled_at = time.time()
+                task.end_time = time.time()
+                task.is_cancelling = False  # 重置标志
+        logger.info(f"任务 {task_id} 已确认取消")
 
 
 # 全局进度追踪器实例

@@ -11,9 +11,10 @@
 import base64
 import io
 import logging
+import asyncio
 
 import numpy as np
-from fastapi import APIRouter, WebSocket, BackgroundTasks, Header, HTTPException, Depends
+from fastapi import APIRouter, WebSocket, Header, HTTPException, Depends, Query
 from PIL import Image
 from starlette.websockets import WebSocketDisconnect
 
@@ -27,9 +28,11 @@ from schemas.detection import (
     SingleModeRequest,
     ImagePair,
     FusionModeRequest,
+    TaskQueueStatusResponse,
 )
 from service.progress_service import progress_tracker, TaskProgress
 from service.image_auto_save_service import image_auto_save_service
+from service.task_scheduler import task_scheduler
 from util.auth import AuthCredentials
 from middleware.auth_middleware import get_current_user
 from db import db_manager
@@ -59,11 +62,35 @@ async def run_single_detection_task(
         decoded_images: list[np.ndarray] = []
 
         # 解码所有图像并追踪进度
-        for _, img_base64 in enumerate(images):
+        for i, img_base64 in enumerate(images):
+            # 检查取消请求
+            if await progress_tracker.check_cancellation(task_id):
+                logger.info(f"任务 {task_id} 在解码第 {i} 张图片时被取消")
+                await progress_tracker.confirm_cancel(task_id)
+                await connection_manager.broadcast_by_task(
+                    {
+                        "type": "task_cancelled",
+                        "data": {
+                            "task_id": task_id,
+                            "status": "cancelled",
+                            "message": "任务已取消",
+                            "processed_items": i,
+                            "total_items": len(images),
+                        },
+                    },
+                    task_id,
+                )
+                return
+
             decoded_images.append(decode_base64_image(img_base64))
 
         # 定义进度回调函数
         async def progress_callback(current: int, total: int, result: DetectionResultItem) -> None:
+            # 每次处理完一张图片后检查取消
+            if await progress_tracker.check_cancellation(task_id):
+                logger.info(f"任务 {task_id} 在处理第 {current} 张图片时被取消")
+                return
+
             await progress_tracker.update_progress(
                 task_id=task_id,
                 result=result,
@@ -74,6 +101,26 @@ async def run_single_detection_task(
         batch_results = await infer_service.detect_single_batch(
             decoded_images, progress_callback=progress_callback
         )
+
+        # 再次检查是否被取消（可能在处理过程中被取消）
+        if await progress_tracker.check_cancellation(task_id):
+            await progress_tracker.confirm_cancel(task_id)
+            await connection_manager.broadcast_by_task(
+                {
+                    "type": "task_cancelled",
+                    "data": {
+                        "task_id": task_id,
+                        "status": "cancelled",
+                        "message": "任务已取消",
+                        "processed_items": len(batch_results),
+                        "total_items": len(decoded_images),
+                    },
+                },
+                task_id,
+            )
+            logger.info(f"任务 {task_id} 已取消，已处理 {len(batch_results)}/{len(decoded_images)} 项")
+            return
+
         logger.info(f"单模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 张图片")
 
         # 获取任务状态
@@ -153,13 +200,37 @@ async def run_fusion_detection_task(
         decoded_pairs: list[tuple[np.ndarray, np.ndarray]] = []
 
         # 解码所有图像对并追踪进度
-        for _, pair in enumerate(pairs):
+        for i, pair in enumerate(pairs):
+            # 检查取消请求
+            if await progress_tracker.check_cancellation(task_id):
+                logger.info(f"任务 {task_id} 在解码第 {i} 对图像时被取消")
+                await progress_tracker.confirm_cancel(task_id)
+                await connection_manager.broadcast_by_task(
+                    {
+                        "type": "task_cancelled",
+                        "data": {
+                            "task_id": task_id,
+                            "status": "cancelled",
+                            "message": "任务已取消",
+                            "processed_items": i,
+                            "total_items": len(pairs),
+                        },
+                    },
+                    task_id,
+                )
+                return
+
             decoded_pairs.append(
                 (decode_base64_image(pair.rgb), decode_base64_image(pair.ir))
             )
 
         # 定义进度回调函数
         async def progress_callback(current: int, total: int, result: DetectionResultItem) -> None:
+            # 每次处理完一对图像后检查取消
+            if await progress_tracker.check_cancellation(task_id):
+                logger.info(f"任务 {task_id} 在处理第 {current} 对图像时被取消")
+                return
+
             await progress_tracker.update_progress(
                 task_id=task_id,
                 result=result,
@@ -170,6 +241,25 @@ async def run_fusion_detection_task(
         batch_results = await infer_service.detect_fusion_batch(
             decoded_pairs, progress_callback=progress_callback
         )
+
+        # 再次检查是否被取消（可能在处理过程中被取消）
+        if await progress_tracker.check_cancellation(task_id):
+            await progress_tracker.confirm_cancel(task_id)
+            await connection_manager.broadcast_by_task(
+                {
+                    "type": "task_cancelled",
+                    "data": {
+                        "task_id": task_id,
+                        "status": "cancelled",
+                        "message": "任务已取消",
+                        "processed_items": len(batch_results),
+                        "total_items": len(decoded_pairs),
+                    },
+                },
+                task_id,
+            )
+            logger.info(f"任务 {task_id} 已取消，已处理 {len(batch_results)}/{len(decoded_pairs)} 项")
+            return
 
         logger.info(f"融合模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 对图像")
 
@@ -331,7 +421,6 @@ async def save_images_auto(
 @router.post("/single", response_model=AsyncTaskResponse)
 async def detect_single_mode(
     request: SingleModeRequest,
-    background_tasks: BackgroundTasks,
     infer_service: InferServiceDep,
     connection_manager: ConnectionManagerDep,
     auth: Annotated[AuthCredentials, Depends(get_current_user)],
@@ -343,6 +432,8 @@ async def detect_single_mode(
     需要 API Key 认证（通过 X-API-Key 请求头或 Authorization: Bearer）。
     立即返回 task_id，后台异步执行检测任务。
     任务进度会自动推送到对应的 WebSocket 客户端。
+
+    任务会根据 API Key 的优先级被调度执行，高优先级任务优先处理。
     """
     # 验证认证
     if not auth.authenticated:
@@ -355,8 +446,12 @@ async def detect_single_mode(
             message=f"无效的 client_id: {x_client_id}，请先建立 WebSocket 连接",
         )
 
-    # 创建任务
-    task_id = await progress_tracker.create_task(total_items=len(request.images))
+    # 创建任务（使用 API Key 的优先级）
+    task_id = await progress_tracker.create_task(
+        total_items=len(request.images),
+        client_id=x_client_id,
+        priority=auth.priority,  # 使用 API Key 的优先级
+    )
     await progress_tracker.start_task(task_id)
 
     # 注册任务到客户
@@ -377,27 +472,43 @@ async def detect_single_mode(
         else:
             api_key_hash = str(auth.user_id or "unknown")[:32]
 
-    # 后台异步执行检测
-    background_tasks.add_task(
-        run_single_detection_task,
+    # 提交任务到调度器（按优先级调度执行）
+    success = await task_scheduler.submit_task(
         task_id=task_id,
-        images=request.images,
-        infer_service=infer_service,
-        connection_manager=connection_manager,
-        api_key_hash=api_key_hash,
-        client_id=x_client_id,
+        task_type="single",
+        task_data={
+            "task_id": task_id,
+            "images": request.images,
+            "api_key_hash": api_key_hash,
+            "client_id": x_client_id,
+        },
+        priority=auth.priority,
+        callback=lambda data: run_single_detection_task(
+            task_id=data["task_id"],
+            images=data["images"],
+            infer_service=infer_service,
+            connection_manager=connection_manager,
+            api_key_hash=data["api_key_hash"],
+            client_id=data["client_id"],
+        ),
     )
+
+    if not success:
+        await progress_tracker.fail_task(task_id, "任务提交失败，调度器未就绪")
+        return AsyncTaskResponse(
+            task_id=task_id,
+            message="任务提交失败，请稍后重试",
+        )
 
     return AsyncTaskResponse(
         task_id=task_id,
-        message="单模态检测任务已创建，正在后台处理",
+        message="单模态检测任务已创建，等待调度执行",
     )
 
 
 @router.post("/fusion", response_model=AsyncTaskResponse)
 async def detect_fusion_mode(
     request: FusionModeRequest,
-    background_tasks: BackgroundTasks,
     infer_service: InferServiceDep,
     connection_manager: ConnectionManagerDep,
     auth: Annotated[AuthCredentials, Depends(get_current_user)],
@@ -409,6 +520,8 @@ async def detect_fusion_mode(
     需要 API Key 认证（通过 X-API-Key 请求头或 Authorization: Bearer）。
     立即返回 task_id，后台异步执行检测任务。
     任务进度会自动推送到对应的 WebSocket 客户端。
+
+    任务会根据 API Key 的优先级被调度执行，高优先级任务优先处理。
     """
     # 验证认证
     if not auth.authenticated:
@@ -421,8 +534,12 @@ async def detect_fusion_mode(
             message=f"无效的 client_id: {x_client_id}，请先建立 WebSocket 连接",
         )
 
-    # 创建任务
-    task_id = await progress_tracker.create_task(total_items=len(request.pairs))
+    # 创建任务（使用 API Key 的优先级）
+    task_id = await progress_tracker.create_task(
+        total_items=len(request.pairs),
+        client_id=x_client_id,
+        priority=auth.priority,  # 使用 API Key 的优先级
+    )
     await progress_tracker.start_task(task_id)
 
     # 注册任务到客户
@@ -441,20 +558,37 @@ async def detect_fusion_mode(
         else:
             api_key_hash = str(auth.user_id or "unknown")[:32]
 
-    # 后台异步执行检测
-    background_tasks.add_task(
-        run_fusion_detection_task,
+    # 提交任务到调度器（按优先级调度执行）
+    success = await task_scheduler.submit_task(
         task_id=task_id,
-        pairs=request.pairs,
-        infer_service=infer_service,
-        connection_manager=connection_manager,
-        api_key_hash=api_key_hash,
-        client_id=x_client_id,
+        task_type="fusion",
+        task_data={
+            "task_id": task_id,
+            "pairs": request.pairs,
+            "api_key_hash": api_key_hash,
+            "client_id": x_client_id,
+        },
+        priority=auth.priority,
+        callback=lambda data: run_fusion_detection_task(
+            task_id=data["task_id"],
+            pairs=data["pairs"],
+            infer_service=infer_service,
+            connection_manager=connection_manager,
+            api_key_hash=data["api_key_hash"],
+            client_id=data["client_id"],
+        ),
     )
+
+    if not success:
+        await progress_tracker.fail_task(task_id, "任务提交失败，调度器未就绪")
+        return AsyncTaskResponse(
+            task_id=task_id,
+            message="任务提交失败，请稍后重试",
+        )
 
     return AsyncTaskResponse(
         task_id=task_id,
-        message="融合模态检测任务已创建，正在后台处理",
+        message="融合模态检测任务已创建，等待调度执行",
     )
 
 
@@ -534,4 +668,118 @@ async def get_task_status(
         results=task.all_results if task.status in ("completed", "partial_failure", "failed") else None,
         current_result=task.current_result,
         errors=task.error_items if task.error_items else None,
+        priority=task.priority,
     )
+
+
+@router.delete("/task/{task_id}", response_model=TaskStatusResponse)
+async def cancel_task_endpoint(
+    task_id: str,
+    auth: Annotated[AuthCredentials, Depends(get_current_user)],
+):
+    """取消任务
+
+    需要 API Key 认证。
+    只有正在运行的任务可以被取消，已完成或已失败的任务无法取消。
+    """
+    # 验证认证
+    if not auth.authenticated:
+        raise HTTPException(status_code=401, detail="未授权访问，需要 API Key 或 JWT Token")
+
+    task = await progress_tracker.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 尝试取消任务
+    success = await progress_tracker.cancel_task(task_id, "用户请求取消")
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无法取消任务，当前状态：{task.status}",
+        )
+
+    # 等待一小段时间让任务处理取消逻辑
+    await asyncio.sleep(0.1)
+
+    # 返回更新后的任务状态
+    updated_task = await progress_tracker.get_task(task_id)
+    assert updated_task
+    return TaskStatusResponse(
+        task_id=updated_task.task_id,
+        status=updated_task.status,
+        total_items=updated_task.total_items,
+        completed_items=updated_task.completed_items,
+        failed_items=updated_task.failed_items,
+        progress_percentage=round(updated_task.progress_percentage, 2),
+        real_count=updated_task.real_count,
+        fake_count=updated_task.fake_count,
+        error_count=updated_task.failed_items,
+        elapsed_time_ms=updated_task.elapsed_time_ms,
+        message=updated_task.message,
+        results=None,  # 取消时不返回完整结果
+        current_result=updated_task.current_result,
+        errors=None,
+        priority=updated_task.priority,
+    )
+
+
+@router.get("/tasks", response_model=List[TaskStatusResponse])
+async def list_tasks(
+    auth: Annotated[AuthCredentials, Depends(get_current_user)],
+    x_client_id: str = Header(..., description="WebSocket 分配的客户端 ID"),
+    status: Optional[str] = Query(None, description="按状态过滤：pending, running, completed, partial_failure, failed, cancelled"),
+):
+    """获取当前客户端的所有任务列表
+
+    需要 API Key 认证。
+    返回该客户端创建的所有任务，支持按状态过滤。
+    """
+    # 验证认证
+    if not auth.authenticated:
+        raise HTTPException(status_code=401, detail="未授权访问")
+
+    # 获取该客户端的所有任务
+    tasks = await progress_tracker.get_client_tasks(x_client_id)
+
+    # 按状态过滤
+    if status:
+        tasks = [t for t in tasks if t.status == status]
+
+    # 转换为响应格式
+    return [
+        TaskStatusResponse(
+            task_id=task.task_id,
+            status=task.status,
+            total_items=task.total_items,
+            completed_items=task.completed_items,
+            failed_items=task.failed_items,
+            progress_percentage=round(task.progress_percentage, 2),
+            real_count=task.real_count,
+            fake_count=task.fake_count,
+            error_count=task.failed_items,
+            elapsed_time_ms=task.elapsed_time_ms,
+            message=task.message,
+            results=None,  # 列表不返回完整结果
+            current_result=task.current_result,
+            errors=task.error_items if task.error_items else None,
+            priority=task.priority,
+        )
+        for task in tasks
+    ]
+
+
+@router.get("/queue/status", response_model=TaskQueueStatusResponse)
+async def get_queue_status(
+    auth: Annotated[AuthCredentials, Depends(get_current_user)],
+):
+    """获取任务队列状态（仅管理员）
+
+    需要 JWT Token 认证。
+    返回调度器状态、队列大小、工作线程数等信息。
+    """
+    # 验证认证（仅管理员）
+    if not auth.authenticated or auth.auth_type != "jwt":
+        raise HTTPException(status_code=403, detail="仅管理员可访问")
+
+    status = await task_scheduler.get_queue_status()
+    return TaskQueueStatusResponse(**status)

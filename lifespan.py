@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 from service import infer_service
 from util.websocket_manager import ConnectionManager, connection_manager
 from util.config import settings
+from service.task_scheduler import task_scheduler
 
 
 # 全局变量
@@ -85,6 +86,17 @@ async def initialize_image_auto_save_service():
         # 自动存储服务初始化失败不影响服务启动，继续运行
 
 
+async def initialize_task_scheduler():
+    """初始化任务调度器"""
+    try:
+        logger.info("Initializing task scheduler...")
+        await task_scheduler.start()
+        logger.info("Task scheduler initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize task scheduler: {e}", exc_info=True)
+        # 调度器初始化失败不影响服务启动，继续运行
+
+
 async def cleanup_database():
     """清理数据库连接"""
     try:
@@ -93,6 +105,15 @@ async def cleanup_database():
         logger.info("Database connection closed")
     except Exception as e:
         logger.error(f"Error closing database connection: {e}")
+
+
+async def cleanup_task_scheduler():
+    """清理任务调度器"""
+    try:
+        await task_scheduler.stop()
+        logger.info("Task scheduler stopped")
+    except Exception as e:
+        logger.error(f"Error stopping task scheduler: {e}")
 
 
 @asynccontextmanager
@@ -104,6 +125,7 @@ async def lifespan(_app: FastAPI):
         await initialize_database()
         await initialize_image_storage()
         await initialize_image_auto_save_service()
+        await initialize_task_scheduler()
     except Exception as e:
         logger.error(f"Failed to initialize application: {e}", exc_info=True)
         raise
@@ -112,6 +134,7 @@ async def lifespan(_app: FastAPI):
 
     # 清理阶段
     logger.info("Shutting down")
+    await cleanup_task_scheduler()
     await cleanup_database()
 
 

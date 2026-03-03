@@ -66,16 +66,22 @@ def create_activation_code(token: str) -> str | None:
 
     name = input("用户名 (name): ").strip()
     if not name:
-        print("[错误] 用户名不能为空")
-        return None
+        name = "tmp"
 
     try:
         max_uses = int(input("最大使用次数 (默认 10): ").strip() or "10")
         expires_in_hours = int(input("过期时间 (小时，默认 24): ").strip() or "24")
+        priority = int(input("任务优先级 0-100 (默认 50, VIP 建议 80+): ").strip() or "50")
+
+        # 验证优先级范围
+        if priority < 0 or priority > 100:
+            print(f"[警告] 优先级超出范围 (0-100)，已自动调整为 50")
+            priority = 50
     except ValueError:
         print("[错误] 输入无效，使用默认值")
         max_uses = 10
         expires_in_hours = 24
+        priority = 50
 
     try:
         response = requests.post(
@@ -83,7 +89,8 @@ def create_activation_code(token: str) -> str | None:
             json={
                 "name": name,
                 "max_uses": max_uses,
-                "expires_in_hours": expires_in_hours
+                "expires_in_hours": expires_in_hours,
+                "priority": priority,
             },
             headers={"Authorization": f"Bearer {token}"}
         )
@@ -94,6 +101,7 @@ def create_activation_code(token: str) -> str | None:
             print(f"  激活码：{data['code']}")
             print(f"  用户：{data['user_id']}")
             print(f"  最大使用次数：{data['max_uses']}")
+            print(f"  优先级：{data.get('priority', 0)} (范围 0-100，值越大优先级越高)")
             print(f"  过期时间：{data.get('expires_at', '永不过期')}")
             return data["code"]
         else:

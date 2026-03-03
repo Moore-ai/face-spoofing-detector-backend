@@ -10,7 +10,6 @@
 """
 
 import logging
-from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,7 +30,6 @@ from util.auth import (
     update_activation_code,
     delete_activation_code,
     deactivate_activation_code,
-    JWT_EXPIRATION_HOURS,
 )
 from util.auth import AuthCredentials
 from middleware.auth_middleware import get_current_user
@@ -116,9 +114,10 @@ async def generate_activation_code(
         max_uses=request.max_uses,
         expires_in_hours=request.expires_in_hours,
         permissions=request.permissions,
+        priority=request.priority,  # 使用请求中的优先级
     )
 
-    logger.info(f"用户 {auth.user_id} 生成了新激活码：{code_info.code}")
+    logger.info(f"用户 {auth.user_id} 生成了新激活码：{code_info.code} (priority={code_info.priority})")
 
     return ActivationCodeGenerateResponse(
         code=code_info.code,
@@ -154,6 +153,7 @@ async def update_activation_code_endpoint(
         is_active=request.is_active,
         max_uses=request.max_uses,
         permissions=request.permissions,
+        priority=request.priority,
     )
 
     if not code_info:

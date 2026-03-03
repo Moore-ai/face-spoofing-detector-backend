@@ -2,7 +2,7 @@
 检测相关的数据模型定义
 """
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, field_serializer, Field
 import numpy as np
 from typing import List, Optional
 
@@ -38,7 +38,7 @@ class TaskStatusResponse(BaseModel):
     """任务状态查询响应"""
 
     task_id: str
-    status: str  # pending, running, completed, partial_failure, failed
+    status: str  # pending, running, completed, partial_failure, failed, cancelled
     total_items: int
     completed_items: int
     failed_items: int = 0  # 失败项数量
@@ -51,6 +51,7 @@ class TaskStatusResponse(BaseModel):
     results: Optional[List[DetectionResultItem]] = None
     current_result: Optional[DetectionResultItem] = None
     errors: Optional[List[dict]] = None  # 错误详情列表
+    priority: int = Field(default=0, ge=0, le=100, description="任务优先级，范围 0-100，值越大优先级越高")
 
 
 class SingleModeRequest(BaseModel):
@@ -73,3 +74,12 @@ class FusionModeRequest(BaseModel):
 
     mode: str
     pairs: list[ImagePair]  # 图像对列表
+
+
+class TaskQueueStatusResponse(BaseModel):
+    """任务队列状态响应"""
+
+    is_running: bool
+    queue_size: int
+    max_workers: int
+    active_workers: int

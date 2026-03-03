@@ -35,6 +35,7 @@ class APIKeyInfo(BaseModel):
     created_at: datetime = Field(..., description="创建时间")
     permissions: list[str] = Field(default_factory=list, description="权限列表")
     user_id: str = Field(default="", description="关联的用户 ID")
+    priority: int = Field(default=0, ge=0, le=100, description="任务优先级，范围 0-100，值越大优先级越高")
 
 
 class UserInfo(BaseModel):
