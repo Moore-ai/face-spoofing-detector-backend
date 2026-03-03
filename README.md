@@ -29,6 +29,7 @@
 - **速率限制**：防止 API 滥用，保护服务稳定性
 - **重试机制**：推理失败自动重试，支持指数退避策略
 - **部分失败支持**：批量任务支持部分失败状态，错误可追踪
+- **任务优先级调度**：基于优先级的任务队列，高优先级任务优先执行
 - **图片存储管理**：支持本地/S3 存储，提供图片上传、查询、删除、统计 API
 - **存储配额管理**：防止存储溢出，支持手动清理过期图片
 
@@ -392,7 +393,16 @@ curl -H "X-API-Key: sk_xxxxx..." \
 | `/infer/fusion` | POST | 融合模态检测 | **需要 API Key** |
 | `/infer/ws` | WebSocket | 实时进度推送 | 内置认证 |
 | `/infer/task/{task_id}` | GET | 查询任务状态 | **需要 API Key** |
+| `/infer/task/{task_id}` | DELETE | 取消任务 | **需要 API Key** |
+| `/infer/tasks` | GET | 获取当前客户端的任务列表 | **需要 API Key** |
+| `/infer/queue/status` | GET | 获取任务队列状态 | **需要 JWT（管理员）** |
 | `/health` | GET | 健康检查 | 无 |
+
+**任务优先级调度**（新增）：
+- 所有推理任务通过优先级任务调度器执行
+- 高优先级任务优先处理（VIP 客户）
+- 优先级范围：0-100（值越大优先级越高）
+- 通过激活码设置 API Key 的优先级
 
 ### 历史记录相关端点（新增）
 
@@ -743,6 +753,12 @@ python tests/test_history.py
 
 # 图片存储功能测试（无需服务运行）
 python tests/test_storage.py
+
+# 批量任务管理测试（需要服务运行）
+python tests/test_task_management.py
+
+# 任务调度器功能测试（无需服务运行）
+python tests/test_task_scheduler.py
 ```
 
 **测试说明**：
@@ -752,16 +768,8 @@ python tests/test_storage.py
 - `tests/test_websocket_client.py` - WebSocket 客户端测试
 - `tests/test_history.py` - 历史记录功能测试（数据库 CRUD、查询、统计）
 - `tests/test_storage.py` - 图片存储功能测试（上传、查询、删除、统计、清理、批量下载、图片压缩、存储配额）
-  - 测试 1: 存储初始化
-  - 测试 2: 上传图片
-  - 测试 3: 查询图片
-  - 测试 4: 存储统计
-  - 测试 5: 删除图片
-  - 测试 6: 清理过期图片
-  - 测试 7: 获取所有图片 ID 列表
-  - 测试 8: 图片压缩功能测试（OpenCV/Pillow）
-  - 测试 9: 存储配额测试
-  - 测试 10: API 端点测试（需要服务运行）
+- `tests/test_task_management.py` - 批量任务管理增强功能测试
+- `tests/test_task_scheduler.py` - 优先级任务调度器功能测试
 - `tests/README.md` - 测试使用指南
 
 ## 注意事项
