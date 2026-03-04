@@ -9,6 +9,7 @@ from controller import (
     history_controller,
     storage_controller,
     metrics_controller,
+    config_controller,
 )
 
 import logging
@@ -55,6 +56,12 @@ ROUTER_CONFIGS = [
         "router": storage_controller.router,
         "prefix": "/storage",
         "tag": ["图片存储"],
+        "dependencies": [],
+    },
+    {
+        "router": config_controller.router,
+        "prefix": "/system",
+        "tag": ["系统配置"],
         "dependencies": [],
     },
 ]
