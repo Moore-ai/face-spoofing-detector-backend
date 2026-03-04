@@ -34,6 +34,7 @@
 - **存储配额管理**：防止存储溢出，支持手动清理过期图片
 - **Prometheus 监控**：暴露丰富的指标数据，支持 QPS、延迟、成功率等统计
 - **健康检查增强**：详细健康检查，支持模型、GPU、磁盘、数据库、存储状态监控
+- **配置热更新**：支持运行时动态修改日志、重试、调试、存储策略等配置
 
 ## 技术栈
 
@@ -290,6 +291,56 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:8000']
 ```
+
+### 配置热更新（新增）
+
+系统支持运行时动态修改配置，无需重启服务。
+
+| 端点 | 方法 | 说明 | 认证要求 |
+|------|------|------|----------|
+| `/system/config` | GET | 获取所有配置组 | **需要 JWT（管理员）** |
+| `/system/config/logging` | GET/PUT | 日志配置查询/更新 | **需要 JWT（管理员）** |
+| `/system/config/retry` | GET/PUT | 重试配置查询/更新 | **需要 JWT（管理员）** |
+| `/system/config/debug` | GET/PUT | 调试配置查询/更新 | **需要 JWT（管理员）** |
+| `/system/config/storage-strategy` | GET/PUT | 存储策略配置查询/更新 | **需要 JWT（管理员）** |
+| `/system/config/compress` | GET/PUT | 图片压缩配置查询/更新 | **需要 JWT（管理员）** |
+| `/system/config/history` | GET | 获取配置变更历史 | **需要 JWT（管理员）** |
+| `/system/config/rollback/{type}/{index}` | POST | 回滚配置到历史版本 | **需要 JWT（管理员）** |
+
+**支持热更新的配置类型**：
+| 配置类型 | 配置项 | 生效时机 |
+|----------|--------|----------|
+| 日志配置 | `log_level`, `log_to_console`, `log_json_format` 等 | 立即生效 |
+| 重试配置 | `retry_enabled`, `retry_max_attempts` 等 | 下次推理时应用 |
+| 调试配置 | `debug_mode`, `debug_failure_rate` 等 | 下次推理时应用 |
+| 存储策略 | `storage_auto_save`, `storage_save_strategy` 等 | 下次保存图片时应用 |
+| 压缩配置 | `compress_enabled`, `compress_quality` 等 | 下次压缩图片时应用 |
+
+**使用示例**：
+```bash
+# 获取当前配置
+curl http://127.0.0.1:8000/system/config \
+  -H "Authorization: Bearer {jwt_token}"
+
+# 更新日志级别为 DEBUG
+curl -X PUT http://127.0.0.1:8000/system/config/logging \
+  -H "Authorization: Bearer {jwt_token}" \
+  -H "Content-Type: application/json" \
+  -d '{"log_level": "DEBUG"}'
+
+# 获取配置历史
+curl "http://127.0.0.1:8000/system/config/history?limit=5" \
+  -H "Authorization: Bearer {jwt_token}"
+
+# 回滚配置到历史版本 #0
+curl -X POST http://127.0.0.1:8000/system/config/rollback/logging/0 \
+  -H "Authorization: Bearer {jwt_token}"
+```
+
+**注意**：
+- 配置变更仅对当前运行实例有效，不会写入 `.env` 文件
+- 服务重启后配置恢复到 `.env` 中的值
+- 配置历史记录存储在内存中，服务重启后清空
 
 ## 认证系统使用指南
 
@@ -714,12 +765,14 @@ backend/
 │   ├── activation_controller.py # 激活码路由
 │   ├── history_controller.py    # 历史记录查询/统计/删除 ✅
 │   ├── storage_controller.py    # 图片存储管理 ✅
-│   └── metrics_controller.py     # Prometheus 指标暴露 ✅
+│   ├── metrics_controller.py     # Prometheus 指标暴露 ✅
+│   └── config_controller.py     # 配置热更新管理 ✅
 ├── service/                     # 业务逻辑层
 │   ├── infer_service.py         # 主推理服务，协调控制器和推理器
 │   ├── progress_service.py      # 进度追踪服务
 │   ├── history_service.py       # 历史记录持久化服务 ✅
-│   └── image_auto_save_service.py # 图片自动存储服务 ✅
+│   ├── image_auto_save_service.py # 图片自动存储服务 ✅
+│   └── config_service.py        # 配置热更新管理服务 ✅
 ├── inferencer/                  # 模型推理实现层
 │   ├── base_inferencer.py       # 抽象基类，定义推理接口
 │   ├── inferencer_factory.py    # 工厂类，创建推理器实例
@@ -742,7 +795,8 @@ backend/
 │   ├── auth.py                  # 认证相关模型
 │   ├── activation.py            # 激活码相关模型
 │   ├── history.py               # 历史记录相关模型 ✅
-│   └── storage.py               # 图片存储相关模型 ✅
+│   ├── storage.py               # 图片存储相关模型 ✅
+│   └── config.py                # 配置热更新相关模型 ✅
 ├── middleware/                  # 中间件
 │   ├── auth_middleware.py       # 认证中间件
 │   ├── rate_limiter.py          # 速率限制中间件
@@ -755,7 +809,12 @@ backend/
 │   ├── test_activation.py       # 激活码测试
 │   ├── test_websocket_client.py # WebSocket 测试
 │   ├── test_history.py          # 历史记录功能测试 ✅
-│   └── test_storage.py          # 图片存储功能测试 ✅
+│   ├── test_storage.py          # 图片存储功能测试 ✅
+│   ├── test_task_management.py  # 批量任务管理增强测试 ✅
+│   ├── test_task_scheduler.py   # 优先级任务调度器测试 ✅
+│   ├── test_prometheus.py       # Prometheus 指标测试 ✅
+│   ├── test_health_check.py     # 健康检查增强测试 ✅
+│   └── test_config_hotreload.py # 配置热更新功能测试 ✅
 ├── models/                      # 模型文件存储（.gitignore）
 ├── db/                          # SQLite 数据库文件（自动生成） ✅
 ├── storage/                     # 图片存储目录（自动生成） ✅
@@ -840,6 +899,12 @@ python tests/test_prometheus.py
 
 # 健康检查增强测试（需要服务运行）
 python tests/test_health_check.py
+
+# 配置热更新测试（需要服务运行）
+python tests/test_config_hotreload.py
+
+# 健康检查增强测试（需要服务运行）
+python tests/test_health_check.py
 ```
 
 **测试说明**：
@@ -862,6 +927,14 @@ python tests/test_health_check.py
   - 测试简单健康检查端点
   - 测试未授权访问被拒绝
   - 测试管理员 JWT 访问详细健康检查
+- `tests/test_config_hotreload.py` - 配置热更新功能测试
+  - 获取应用配置（需 JWT）
+  - 未认证访问（应返回 401）
+  - 更新日志配置
+  - 更新重试配置
+  - 更新调试配置
+  - 获取配置历史
+  - 回滚配置
 - `tests/README.md` - 测试使用指南
 
 ## 注意事项
@@ -893,6 +966,12 @@ python tests/test_health_check.py
     - 存储配额用于防止存储溢出，建议根据磁盘空间合理设置
     - 清理过期图片需手动调用 `POST /storage/cleanup` 端点
     - S3 存储需要安装 `boto3` 库：`pip install boto3`
+14. **配置热更新**：
+    - 配置变更仅对当前运行实例有效，不会写入 `.env` 文件
+    - 服务重启后配置恢复到 `.env` 中的值
+    - `log_level` 更新后立即生效，其他配置在下次使用时自动应用
+    - 配置历史记录存储在内存中，服务重启后清空
+    - 所有配置端点需要管理员 JWT Token 认证
 
 ## 许可证
 
