@@ -501,6 +501,8 @@ async def detect_single_mode(
         else:
             api_key_hash = str(auth.user_id or "unknown")[:32]
 
+    logger.info(f"[detect_single_mode] auth.user_id={auth.user_id}, api_key_hash={api_key_hash}")
+
     # 提交任务到调度器（按优先级调度执行）
     success = await task_scheduler.submit_task(
         task_id=task_id,

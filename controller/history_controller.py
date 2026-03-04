@@ -49,7 +49,7 @@ def require_admin(
     return auth
 
 
-@router.get("/", response_model=HistoryQueryResponse, tags=["历史记录"])
+@router.get("", response_model=HistoryQueryResponse, tags=["历史记录"])
 async def query_history(
     client_id: Optional[str] = Query(None, description="客户端 ID 过滤"),
     mode: Optional[str] = Query(None, description="模式过滤 (single/fusion)"),
@@ -85,6 +85,9 @@ async def query_history(
         start_date = end_date - timedelta(days=days)
 
     try:
+        # 记录调试日志
+        logger.info(f"[query_history] auth_type={auth.auth_type}, user_id={auth.user_id}, client_id={client_id}")
+
         # 如果是普通用户（API Key 认证），只能查询自己的记录
         if auth.auth_type == "api_key":
             # 从 auth 凭据中提取 API Key 哈希（与保存时保持一致）
@@ -93,6 +96,8 @@ async def query_history(
                 api_key_hash = auth.user_id.replace("api_key:", "")[:32]
             else:
                 api_key_hash = str(auth.user_id or "unknown")[:32]
+
+            logger.info(f"[query_history] api_key_hash={api_key_hash}")
 
             result = DetectionHistoryService.query_tasks(
                 db=db,
@@ -118,13 +123,12 @@ async def query_history(
                 page_size=page_size,
             )
 
+        logger.info(f"[query_history] 返回结果：total={result.total}, items={len(result.items)}")
         return result
 
     except Exception as e:
         logger.error(f"Failed to query history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询失败：{str(e)}")
-
-
 @router.get("/stats", response_model=HistoryStatsResponse, tags=["历史记录"])
 async def get_history_stats(
     client_id: Optional[str] = Query(None, description="客户端 ID 过滤"),
@@ -193,7 +197,7 @@ async def get_history_stats(
         raise HTTPException(status_code=500, detail=f"获取统计失败：{str(e)}")
 
 
-@router.delete("/", tags=["历史记录"])
+@router.delete("", tags=["历史记录"])
 async def delete_history(
     task_ids: Optional[str] = Query(None, description="要删除的任务 ID 列表（逗号分隔）"),
     days_ago: Optional[int] = Query(None, description="删除早于 N 天的记录", ge=1),
