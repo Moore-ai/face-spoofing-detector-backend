@@ -33,6 +33,7 @@
 - **图片存储管理**：支持本地/S3 存储，提供图片上传、查询、删除、统计 API
 - **存储配额管理**：防止存储溢出，支持手动清理过期图片
 - **Prometheus 监控**：暴露丰富的指标数据，支持 QPS、延迟、成功率等统计
+- **健康检查增强**：详细健康检查，支持模型、GPU、磁盘、数据库、存储状态监控
 
 ## 技术栈
 
@@ -165,6 +166,7 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 |--------|--------|------|
 | `LOG_LEVEL` | `INFO` | 日志级别：`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` |
 | `LOG_JSON_FORMAT` | `false` | 是否使用 JSON 格式日志 |
+| `LOG_TO_CONSOLE` | `true` | 是否输出到控制台（开发环境建议开启） |
 | `LOG_REQUEST_BODY` | `false` | 是否记录请求体（生产环境建议关闭） |
 | `LOG_RESPONSE_BODY` | `false` | 是否记录响应体（生产环境建议关闭） |
 | `AUDIT_LOG_ENABLED` | `true` | 是否启用审计日志 |
@@ -173,7 +175,7 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 - 普通日志：`logs/{timestamp}.log`
 - 审计日志：`logs/{timestamp}_audit.log`（JSON 格式）
 
-**注意**：日志仅输出到文件，不输出到控制台。
+**注意**：日志默认输出到控制台和文件。
 
 ### 认证配置
 
@@ -432,13 +434,48 @@ curl -H "X-API-Key: sk_xxxxx..." \
 | `/infer/task/{task_id}` | DELETE | 取消任务 | **需要 API Key** |
 | `/infer/tasks` | GET | 获取当前客户端的任务列表 | **需要 API Key** |
 | `/infer/queue/status` | GET | 获取任务队列状态 | **需要 JWT（管理员）** |
-| `/health` | GET | 健康检查 | 无 |
 
 **任务优先级调度**（新增）：
 - 所有推理任务通过优先级任务调度器执行
 - 高优先级任务优先处理（VIP 客户）
 - 优先级范围：0-100（值越大优先级越高）
 - 通过激活码设置 API Key 的优先级
+
+### 健康检查端点
+
+| 端点 | 方法 | 说明 | 认证要求 |
+|------|------|------|----------|
+| `/health` | GET | 简单健康检查 | 无 |
+| `/health/detailed` | GET | 详细健康检查 | **需要 JWT（管理员）** |
+
+**详细健康检查返回字段**：
+- `status`: 整体状态（healthy/degraded/unhealthy）
+- `models`: 模型文件状态列表
+  - `name`: 模型名称
+  - `path`: 模型文件路径
+  - `exists`: 是否存在
+  - `file_size_mb`: 文件大小（MB）
+- `gpu`: GPU 状态
+  - `available`: 是否可用
+  - `device_name`: 设备名称
+  - `memory_total_mb`: 显存总量
+  - `memory_used_mb`: 显存已用
+  - `memory_free_mb`: 显存可用
+  - `memory_used_percent`: 显存使用率
+- `disk`: 磁盘状态
+  - `total_gb`: 总容量
+  - `used_gb`: 已使用
+  - `free_gb`: 可用空间
+  - `used_percent`: 使用率
+- `database`: 数据库状态
+  - `connected`: 是否已连接
+  - `error_message`: 错误信息（如有）
+- `storage`: 存储服务状态
+  - `initialized`: 是否已初始化
+  - `storage_type`: 存储类型
+  - `quota_bytes`: 存储配额
+- `healthy_components`: 健康组件列表
+- `unhealthy_components`: 不健康组件列表
 
 ### 历史记录相关端点（新增）
 
@@ -671,12 +708,13 @@ backend/
 ├── lifespan.py                  # 应用生命周期管理，依赖注入配置（含数据库初始化）
 ├── router.py                    # 路由注册
 ├── controller/                  # FastAPI 控制器（API 端点）
-│   ├── health_controller.py     # 健康检查端点
+│   ├── health_controller.py     # 健康检查端点（含详细健康检查）
 │   ├── infer_controller.py      # 推理接口（单模态/融合模态/WebSocket）
 │   ├── auth_controller.py       # 认证路由（JWT Token、API Key）
 │   ├── activation_controller.py # 激活码路由
 │   ├── history_controller.py    # 历史记录查询/统计/删除 ✅
-│   └── storage_controller.py    # 图片存储管理 ✅
+│   ├── storage_controller.py    # 图片存储管理 ✅
+│   └── metrics_controller.py     # Prometheus 指标暴露 ✅
 ├── service/                     # 业务逻辑层
 │   ├── infer_service.py         # 主推理服务，协调控制器和推理器
 │   ├── progress_service.py      # 进度追踪服务
@@ -708,7 +746,8 @@ backend/
 ├── middleware/                  # 中间件
 │   ├── auth_middleware.py       # 认证中间件
 │   ├── rate_limiter.py          # 速率限制中间件
-│   └── logging_middleware.py    # 请求日志和审计日志中间件
+│   ├── logging_middleware.py    # 请求日志和审计日志中间件
+│   └── metrics_middleware.py    # Prometheus 指标收集中间件
 ├── tests/                       # 测试文件
 │   ├── README.md                # 测试使用指南
 │   ├── test_auth.py             # 认证系统完整测试
@@ -798,6 +837,9 @@ python tests/test_task_scheduler.py
 
 # Prometheus 指标测试（部分需要服务运行）
 python tests/test_prometheus.py
+
+# 健康检查增强测试（需要服务运行）
+python tests/test_health_check.py
 ```
 
 **测试说明**：
@@ -809,13 +851,17 @@ python tests/test_prometheus.py
 - `tests/test_storage.py` - 图片存储功能测试（上传、查询、删除、统计、清理、**批量下载**、**图片压缩**、**存储配额**）
 - `tests/test_task_management.py` - 批量任务管理增强功能测试
 - `tests/test_task_scheduler.py` - 优先级任务调度器功能测试
-- `tests/test_prometheus.py` - Prometheus 指标暴露功能测试（新增）
+- `tests/test_prometheus.py` - Prometheus 指标暴露功能测试
   - 单元测试：指标模块导入、推理指标记录、任务指标记录、WebSocket 连接指标、激活码使用指标
   - 集成测试：/metrics 端点可用性、指标格式验证、HTTP 请求指标、推理指标、任务指标、速率限制指标、错误指标、API Key 使用量指标
 - `tests/test_history.py` - 历史记录功能测试（数据库 CRUD、查询、统计）
 - `tests/test_storage.py` - 图片存储功能测试（上传、查询、删除、统计、清理、批量下载、图片压缩、存储配额）
 - `tests/test_task_management.py` - 批量任务管理增强功能测试
 - `tests/test_task_scheduler.py` - 优先级任务调度器功能测试
+- `tests/test_health_check.py` - 健康检查增强功能测试
+  - 测试简单健康检查端点
+  - 测试未授权访问被拒绝
+  - 测试管理员 JWT 访问详细健康检查
 - `tests/README.md` - 测试使用指南
 
 ## 注意事项
