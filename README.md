@@ -32,6 +32,7 @@
 - **任务优先级调度**：基于优先级的任务队列，高优先级任务优先执行
 - **图片存储管理**：支持本地/S3 存储，提供图片上传、查询、删除、统计 API
 - **存储配额管理**：防止存储溢出，支持手动清理过期图片
+- **Prometheus 监控**：暴露丰富的指标数据，支持 QPS、延迟、成功率等统计
 
 ## 技术栈
 
@@ -46,6 +47,7 @@
 - **测试框架**：pytest（单元测试和集成测试）
 - **API 文档**：Swagger UI、ReDoc（自动生成）
 - **依赖管理**：uv（推荐）或 pip
+- **监控指标**：Prometheus 指标暴露
 
 ## 快速开始
 
@@ -252,6 +254,40 @@ uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 - 本地存储采用两级目录结构：`storage/images/{prefix1}/{prefix2}/{image_id}.bin`
 - 存储配额用于防止存储溢出
 - 清理过期图片需要手动调用 API 端点
+
+### Prometheus 监控配置（新增）
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `PROMETHEUS_ENABLED` | `true` | 是否启用 Prometheus 指标收集 |
+| `PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus 指标端点路径 |
+
+**收集的指标**：
+- `http_requests_total` - HTTP 请求总数（按方法、端点、状态码分类）
+- `http_request_latency_seconds` - HTTP 请求延迟直方图
+- `inference_total` - 推理总数（按模态、结果分类）
+- `inference_latency_milliseconds` - 推理延迟直方图
+- `task_total` - 任务总数（按模式、状态分类）
+- `task_success_rate` - 任务成功率
+- `websocket_active_connections` - 活跃 WebSocket 连接数
+- `api_key_usage_total` - API Key 使用量
+- `activation_code_usage_total` - 激活码使用量
+- `rate_limit_total` - 速率限制触发次数
+- `error_total` - 错误总数
+- `system_info` - 系统信息
+
+**使用示例**：
+```bash
+# 访问/metrics 端点获取 Prometheus 格式指标
+curl http://127.0.0.1:8000/metrics
+
+# Prometheus 配置文件（prometheus.yml）
+scrape_configs:
+  - job_name: 'heli_code_backend'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:8000']
+```
 
 ## 认证系统使用指南
 
@@ -759,6 +795,9 @@ python tests/test_task_management.py
 
 # 任务调度器功能测试（无需服务运行）
 python tests/test_task_scheduler.py
+
+# Prometheus 指标测试（部分需要服务运行）
+python tests/test_prometheus.py
 ```
 
 **测试说明**：
@@ -766,6 +805,13 @@ python tests/test_task_scheduler.py
 - `tests/test_infer.py` - 推理功能测试（单模态、融合模态、任务查询、进度推送）
 - `tests/test_activation.py` - 激活码单元测试（离线测试）
 - `tests/test_websocket_client.py` - WebSocket 客户端测试
+- `tests/test_history.py` - 历史记录功能测试（数据库 CRUD、查询、统计）
+- `tests/test_storage.py` - 图片存储功能测试（上传、查询、删除、统计、清理、**批量下载**、**图片压缩**、**存储配额**）
+- `tests/test_task_management.py` - 批量任务管理增强功能测试
+- `tests/test_task_scheduler.py` - 优先级任务调度器功能测试
+- `tests/test_prometheus.py` - Prometheus 指标暴露功能测试（新增）
+  - 单元测试：指标模块导入、推理指标记录、任务指标记录、WebSocket 连接指标、激活码使用指标
+  - 集成测试：/metrics 端点可用性、指标格式验证、HTTP 请求指标、推理指标、任务指标、速率限制指标、错误指标、API Key 使用量指标
 - `tests/test_history.py` - 历史记录功能测试（数据库 CRUD、查询、统计）
 - `tests/test_storage.py` - 图片存储功能测试（上传、查询、删除、统计、清理、批量下载、图片压缩、存储配额）
 - `tests/test_task_management.py` - 批量任务管理增强功能测试
