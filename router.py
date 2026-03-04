@@ -8,6 +8,7 @@ from controller import (
     activation_controller,
     history_controller,
     storage_controller,
+    metrics_controller,
 )
 
 import logging
@@ -18,6 +19,12 @@ ROUTER_CONFIGS = [
         "router": health_controller.router,
         "prefix": "",
         "tag": ["健康测试"],
+        "dependencies": [],
+    },
+    {
+        "router": metrics_controller.router,
+        "prefix": "",
+        "tag": ["监控指标"],
         "dependencies": [],
     },
     {

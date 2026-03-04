@@ -294,6 +294,8 @@ class ProgressTracker:
                 task.status = "cancelled"
                 task.cancelled_at = time.time()
                 task.end_time = time.time()
+                task.cancelled_at = time.time()
+                task.end_time = time.time()
                 task.is_cancelling = False  # 重置标志
         logger.info(f"任务 {task_id} 已确认取消")
 

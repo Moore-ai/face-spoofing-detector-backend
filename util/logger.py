@@ -21,11 +21,13 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
 
-        # 添加额外字段
-        if hasattr(record, "req_id"):
-            log_data["req_id"] = record.req_id
-        if hasattr(record, "user_id"):
-            log_data["user_id"] = record.user_id
+        # 添加额外字段（使用 getattr 避免 hasattr 问题）
+        req_id = getattr(record, "req_id", None)
+        if req_id is not None:
+            log_data["req_id"] = req_id
+        user_id = getattr(record, "user_id", None)
+        if user_id is not None:
+            log_data["user_id"] = user_id
 
         # 添加位置信息（调试时有用）
         if record.levelno >= logging.ERROR:
@@ -60,6 +62,7 @@ def setup_logging(
     level: int = logging.INFO,
     json_format: bool = False,
     log_dir: str | None = None,
+    log_to_console: bool = False,
 ) -> None:
     """配置应用日志
 
@@ -67,8 +70,9 @@ def setup_logging(
         level: 日志级别
         json_format: 是否使用 JSON 格式（默认 False，使用传统格式）
         log_dir: 日志目录，默认使用 logs/
+        log_to_console: 是否输出到控制台（默认 True）
 
-    注意：日志仅输出到文件，不输出到控制台
+    注意：日志默认同时输出到文件和控制台
     """
     # 创建日志目录
     if log_dir:
@@ -83,6 +87,12 @@ def setup_logging(
 
     # 清除现有处理器（避免重复）
     root_logger.handlers.clear()
+
+    # 控制台输出
+    if log_to_console:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(FileFormatter())
+        root_logger.addHandler(console_handler)
 
     # 选择格式化器
     if json_format:

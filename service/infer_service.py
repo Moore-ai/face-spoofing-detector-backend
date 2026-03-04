@@ -16,6 +16,7 @@ from inferencer.debug_inferencer import DebugSingleInferencer, DebugFusionInfere
 from util.result_parser import parse_fusion_prediction, parse_single_prediction
 from schemas.detection import DetectionResultItem
 from util.config import settings
+from middleware.metrics_middleware import record_inference
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,15 @@ class InferService:
             )
 
             result = infer_result.result
+            assert result
             results.append((result, result.processing_time)) # type: ignore
+
+            # 记录推理指标
+            record_inference(
+                modality="single",
+                result=result.result if result.result else "error",
+                latency_ms=float(result.processing_time) if result.processing_time else 0,
+            )
 
             # 调用进度回调
             if progress_callback:
@@ -248,7 +257,15 @@ class InferService:
             )
 
             result = infer_result.result
+            assert result
             results.append((result, result.processing_time)) # type: ignore
+
+            # 记录推理指标
+            record_inference(
+                modality="fusion",
+                result=result.result if result.result else "error",
+                latency_ms=float(result.processing_time) if result.processing_time else 0,
+            )
 
             # 调用进度回调
             if progress_callback:

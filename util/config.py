@@ -65,6 +65,7 @@ class Config:
 
     # 日志配置（新增）
     LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "false").lower() == "true"
+    LOG_TO_CONSOLE: bool = os.getenv("LOG_TO_CONSOLE", "true").lower() == "true"
     LOG_REQUEST_BODY: bool = os.getenv("LOG_REQUEST_BODY", "false").lower() == "true"
     LOG_RESPONSE_BODY: bool = os.getenv("LOG_RESPONSE_BODY", "false").lower() == "true"
     AUDIT_LOG_ENABLED: bool = os.getenv("AUDIT_LOG_ENABLED", "true").lower() == "true"
@@ -107,6 +108,10 @@ class Config:
     IMAGE_COMPRESS_TYPE: str = os.getenv("IMAGE_COMPRESS_TYPE", "opencv")  # opencv, pillow, resize
     IMAGE_COMPRESS_MAX_WIDTH: Optional[int] = int(os.getenv("IMAGE_COMPRESS_MAX_WIDTH") or 0) or None
     IMAGE_COMPRESS_MAX_HEIGHT: Optional[int] = int(os.getenv("IMAGE_COMPRESS_MAX_HEIGHT") or 0) or None
+
+    # 任务调度器配置
+    TASK_SCHEDULER_MAX_WORKERS: int = int(os.getenv("TASK_SCHEDULER_MAX_WORKERS", "1"))
+    TASK_SCHEDULER_ENABLE_BATCH_PROCESSING: bool = os.getenv("TASK_SCHEDULER_ENABLE_BATCH_PROCESSING", "true").lower() == "true"
 
 
 # 导出配置实例

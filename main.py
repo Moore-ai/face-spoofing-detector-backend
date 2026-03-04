@@ -9,6 +9,7 @@ from util.logger import setup_logging
 from util.config import settings
 from middleware.logging_middleware import RequestLoggingMiddleware, AuditLogMiddleware
 from middleware.rate_limiter import RateLimitMiddleware
+from middleware.metrics_middleware import MetricsMiddleware
 
 from lifespan import lifespan
 from router import register_routers
@@ -17,6 +18,7 @@ from router import register_routers
 setup_logging(
     level=getattr(logging, settings.LOG_LEVEL),
     json_format=settings.LOG_JSON_FORMAT,
+    log_to_console=settings.LOG_TO_CONSOLE,
 )
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,9 @@ if settings.AUDIT_LOG_ENABLED:
 
 # 速率限制中间件
 app.add_middleware(RateLimitMiddleware, enabled=True)
+
+# Prometheus 指标中间件
+app.add_middleware(MetricsMiddleware)
 
 # CORS 中间件
 app.add_middleware(

@@ -35,6 +35,7 @@ from service.image_auto_save_service import image_auto_save_service
 from service.task_scheduler import task_scheduler
 from util.auth import AuthCredentials
 from middleware.auth_middleware import get_current_user
+from middleware.metrics_middleware import record_task_completion
 from db import db_manager
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,9 @@ async def run_single_detection_task(
                 task_id,
             )
             logger.info(f"任务 {task_id} 已取消，已处理 {len(batch_results)}/{len(decoded_images)} 项")
+
+            # 记录任务取消指标
+            record_task_completion(mode="single", status="cancelled", task_id=task_id)
             return
 
         logger.info(f"单模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 张图片")
@@ -147,6 +151,14 @@ async def run_single_detection_task(
             task_id,
         )
 
+        # 记录任务完成指标
+        record_task_completion(
+            mode="single",
+            status=task.status,
+            duration_ms=task.elapsed_time_ms,
+            task_id=task_id,
+        )
+
         # 保存历史记录到数据库
         await save_task_history(
             task_id=task_id,
@@ -168,6 +180,9 @@ async def run_single_detection_task(
     except Exception as e:
         await progress_tracker.fail_task(task_id, str(e))
         logger.error(f"单模态检测任务 {task_id} 失败：{e}", exc_info=True)
+
+        # 记录任务失败指标
+        record_task_completion(mode="single", status="failed", task_id=task_id)
 
         # 发送失败通知给对应的客户
         await connection_manager.broadcast_by_task(
@@ -259,6 +274,9 @@ async def run_fusion_detection_task(
                 task_id,
             )
             logger.info(f"任务 {task_id} 已取消，已处理 {len(batch_results)}/{len(decoded_pairs)} 项")
+
+            # 记录任务取消指标
+            record_task_completion(mode="fusion", status="cancelled", task_id=task_id)
             return
 
         logger.info(f"融合模态检测任务 {task_id} 完成，共处理 {len(batch_results)} 对图像")
@@ -287,6 +305,14 @@ async def run_fusion_detection_task(
             task_id,
         )
 
+        # 记录任务完成指标
+        record_task_completion(
+            mode="fusion",
+            status=task.status,
+            duration_ms=task.elapsed_time_ms,
+            task_id=task_id,
+        )
+
         # 保存历史记录到数据库
         await save_task_history(
             task_id=task_id,
@@ -308,6 +334,9 @@ async def run_fusion_detection_task(
     except Exception as e:
         await progress_tracker.fail_task(task_id, str(e))
         logger.error(f"融合模态检测任务 {task_id} 失败：{e}", exc_info=True)
+
+        # 记录任务失败指标
+        record_task_completion(mode="fusion", status="failed", task_id=task_id)
 
         # 发送失败通知给对应的客户
         await connection_manager.broadcast_by_task(
